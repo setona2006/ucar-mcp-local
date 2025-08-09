@@ -29,13 +29,37 @@ automation/tmp/
 automation/storage_state.json
 playwright-report/
 test-results/
-automation/screenshots/
 
-# Generated images (screenshots, charts)
+# === スクリーンショット・画像ファイル除外設定 ===
+# automation/screenshots フォルダ配下の全てのPNG画像を無視
+automation/screenshots/*.png
+automation/screenshots/*.jpg
+automation/screenshots/*.jpeg
+automation/screenshots/*.gif
+
+# サブフォルダがある場合も含めて除外する
+automation/screenshots/**/*.png
+automation/screenshots/**/*.jpg
+automation/screenshots/**/*.jpeg
+automation/screenshots/**/*.gif
+
+# 作業用一時ファイル・フォルダ
+automation/tmp/
+automation/temp/
+automation/screenshots/temp/
+automation/debug/
+
+# その他の自動生成画像ファイル
+charts/
+reports/
+output/
 *.png
 *.jpg
 *.jpeg
 *.gif
+*.bmp
+*.tiff
+*.webp
 
 # OS
 .DS_Store
@@ -48,4 +72,22 @@ Thumbs.db
 # Node (もしPlaywright拡張でnpm使用時)
 node_modules/
 package-lock.json
+
+# === テスト・デバッグ用一時ファイル ===
+# テスト用JSONファイル
+test_*.json
+debug_*.json
+temp_*.json
+
+# 自動生成される設定ファイル
+*_backup.*
+*_temp.*
+*.tmp
+*.temp
+
+# データベース・キャッシュファイル
+*.db
+*.sqlite
+*.sqlite3
+cache/
 
