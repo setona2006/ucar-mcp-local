@@ -31,6 +31,12 @@ playwright-report/
 test-results/
 automation/screenshots/
 
+# Generated images (screenshots, charts)
+*.png
+*.jpg
+*.jpeg
+*.gif
+
 # OS
 .DS_Store
 Thumbs.db
@@ -42,5 +48,4 @@ Thumbs.db
 # Node (もしPlaywright拡張でnpm使用時)
 node_modules/
 package-lock.json
-automation/screenshots/usdjpy_1h_improved.png
-automation/screenshots/usdjpy_1h_mcp.png
+
