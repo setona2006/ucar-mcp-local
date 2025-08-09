@@ -1,111 +1,148 @@
-# UCAR MCP Local Trading Tools
+# UCAR MCP Local
 
-MCPブリッジ（会話→ローカル実行）とPlaywrightでTradingViewを視覚操作する最小構成です。
+ローカル環境でGPTアプリやMCP経由からTradingViewを操作する自動化ツール集。
 
-## ゴール
-ChatGPT（UCAR）から「USDJPYの1時間足をスクショ」で、ローカルが自動でTradingViewを操作してPNGを保存。
+## 概要
 
-## 0) 前提準備（初回だけ）
+- **Playwright + Python** によるTradingViewの視覚操作
+- **MCP Server** として動作し、ツール呼び出しに応じて各種操作を実行
+- **macro_quiettrap_report** により
+  - プリセット適用
+  - フィボナッチ描画（価格指定 or クイック）
+  - QuietTrap注釈付きスクリーンショット
+  を1コマンドで実行可能
+
+## セットアップ
 
 ```bash
-# Python 3.11+ 推奨
+git clone https://github.com/<yourname>/ucar-mcp-local.git
+cd ucar-mcp-local
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
-
+source .venv/bin/activate  # Windowsは .venv\Scripts\activate
 pip install -r requirements.txt
-
-# ブラウザDL
-python -m playwright install
+playwright install chromium
 ```
 
-## 1) 環境設定
+### 初回設定
 
+1. `.env`ファイルを作成し、TradingViewログイン情報を設定：
 ```bash
-# .envファイルを作成
-cp env.example .env
-# .envファイルを編集してTradingViewのログイン情報を設定
+cp .env.example .env
+# .envファイルを編集してログイン情報を入力
 ```
 
-## 2) TradingViewログイン状態の保存
-
-最初だけヘッドフル（画面表示）でログイン → Cookie/LocalStorageをstorage_state.jsonに保存。
-
+2. 初回ログインでセッション保存：
 ```bash
 python automation/tv_login.py
 ```
 
-※2FA利用時は、コード入力画面で手動入力してから保存でOK。以後は保存済みストレージで自動ログインになります。
+## 使用例
 
-## 3) 単体テスト
-
-```bash
-# USDJPY 1時間足 + RSI/Volumeのスクリーンショット
-python automation/tv_controller.py
-```
-
-## 4) MCPサーバーのテスト
+### 価格指定バージョン：
 
 ```bash
-# 別ターミナルで起動
-python mcp/mcp_server.py
-
-# もう一方で標準入力にJSONを1行入れて試す
-echo '{"id":"1","name":"capture_chart","arguments":{"symbol":"USDJPY","tf":"1h","indicators":["Relative Strength Index","Volume"],"outfile":"automation/screenshots/usdjpy_1h.png"}}' | python mcp/mcp_server.py
+echo '{
+  "id":"mq1",
+  "name":"macro_quiettrap_report",
+  "arguments":{
+    "symbol":"USDJPY","tf":"1h",
+    "preset_name":"senior_ma_cloud","clear_existing":true,
+    "draw_fibo": true, "fibo_mode":"prices",
+    "high":148.96, "low":147.10,
+    "quiettrap":{"side":"sell","score":0.86,"notes":["fibo 148.96→147.10"]}
+  }
+}' | python mcp/mcp_server.py
 ```
 
-→ `automation/screenshots/usdjpy_1h.png` が保存されます。
+### クイック版：
 
-## 5) UCAR（ChatGPT）からの呼び方（実務イメージ）
+```bash
+echo '{
+  "id":"mq2",
+  "name":"macro_quiettrap_report",
+  "arguments":{
+    "symbol":"USDJPY","tf":"1h",
+    "preset_name":"senior_ma_cloud",
+    "draw_fibo": true, "fibo_mode":"quick",
+    "quiettrap":{"side":"sell","score":0.73,"notes":["quick fib"]}
+  }
+}' | python mcp/mcp_server.py
+```
 
-UCAR側（ChatGPT）がMCPツール`capture_chart`を呼ぶ
+### 高速モード（パラメータ調整スキップ）：
 
-引数：`symbol="USDJPY"`, `tf="1h"`, `indicators=["Relative Strength Index","Volume"]`
+```bash
+echo '{
+  "id":"mq3",
+  "name":"macro_quiettrap_report",
+  "arguments":{
+    "symbol":"USDJPY","tf":"1h",
+    "preset_name":"senior_ma_cloud",
+    "skip_params": true,
+    "draw_fibo": true, "fibo_mode":"prices",
+    "high":148.96, "low":147.10,
+    "quiettrap":{"side":"sell","score":0.86,"notes":["fast mode"]}
+  }
+}' | python mcp/mcp_server.py
+```
 
-レスポンス：`{"file":"automation/screenshots/usdjpy_1h.png"}`
+## 主要機能
 
-そのパスの画像が回答に添付される（ChatGPTクライアント側の仕様に依存）
+### MCPツール一覧
 
-## よくある詰まりポイントと回避策
+1. **`capture_chart`** - チャートスクリーンショット撮影
+2. **`tv_action`** - TradingView UI操作
+3. **`tune_indicator`** - インジケーター設定調整
+4. **`draw_fibo`** - フィボナッチリトレースメント描画
+5. **`macro_quiettrap_report`** - 一撃マクロ（プリセット→フィボ→注釈→スクショ）
 
-### ログイン弾かれる/英語UIでない
-一度ヘッドフルで`tv_login.py`を実行し、手動でUI言語を英語に切り替え→保存。
+### プリセット
 
-2FAは手動で通した直後に`storage_state.json`保存が安定。
+- `senior_ma_cloud`: MA20/MA75/EMA200の基本構成
+- `rsi_vol_ma200`: RSI(14) + Volume + SMA(200)
+- `ema50_200_rsi_macd`: EMA(50/200) + RSI(14) + MACD
+- `scalp_light`: スキャルピング軽量（RSI + Volume）
 
-### セレクタ崩れ
-`selectors.py`で集約し、壊れたらここだけ直す。
+## 開発
 
-検索ホットキー（`/`）、時間足ホットキー（数字＋Enter）を多用すると安定。
+### テスト実行
 
-### Cloudflare等のBot対策
-初回は`headless=False`で数秒待機を入れると通りやすい。
+```bash
+# CIと同様のスモークテスト
+echo '{"id":"t1","name":"capture_chart","arguments":{"symbol":"USDJPY","tf":"1h"}}' | python mcp/mcp_server.py
+```
 
-ローカルIPを固定。VPNはなるべく安定回線。
-
-### 遅すぎる/要素が見つからない
-`wait_for_timeout(...)`を適度に入れる。
-
-`wait_for_load_state("networkidle")`を明示。
-
-### 画像が暗い/余白が多い
-スクショ前に「F11」相当で全画面、または`page.locator("canvas")`等で範囲スクショへ拡張。
-
-## プロジェクト構成
+### ファイル構成
 
 ```
 ucar-mcp-local/
-├─ env.example          # 環境変数テンプレート
-├─ requirements.txt     # Python依存関係
-├─ README.md           # このファイル
-├─ mcp/
-│  ├─ manifest.json    # MCPツール定義
-│  └─ mcp_server.py    # MCPサーバー（stdin/stdout）
-└─ automation/
-   ├─ tv_controller.py # メインコントローラー
-   ├─ tv_login.py      # ログイン処理
-   ├─ selectors.py     # UI要素セレクタ
-   └─ screenshots/     # スクリーンショット保存先
+├── .github/workflows/ci.yml    # GitHub Actions CI
+├── mcp/
+│   ├── manifest.json           # MCPツール定義
+│   └── mcp_server.py           # MCPサーバー本体
+├── automation/
+│   ├── tv_controller.py        # TradingView操作ロジック
+│   ├── selectors.py            # UIセレクタ定義
+│   ├── annotate.py             # QuietTrap注釈機能
+│   ├── indicators.json         # インジケータープリセット
+│   └── tv_login.py             # 初回ログイン用
+├── .env.example                # 環境変数テンプレート
+├── requirements.txt            # Python依存関係
+└── README.md                   # このファイル
 ```
+
+## ライセンス
+
+MIT License
+
+## 貢献
+
+1. Fork this repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## サポート
+
+問題や質問がある場合は、GitHubのIssuesをご利用ください。

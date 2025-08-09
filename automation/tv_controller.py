@@ -20,11 +20,23 @@ sys.path.append(os.path.dirname(__file__))
 
 # Fibツールセレクタを直接定義
 FIB_TOOL_BUTTONS = [
-    "button[aria-label*='Fib']",  # English
+    # 描画ツールバーの具体的なセレクタ
+    "button[data-name='linetool-fib-retracement']",
+    "button[aria-label='Fib Retracement']",
+    "button[aria-label*='Fibonacci Retracement']",
+    "button[title*='Fib']",
+    "button[title*='Fibonacci']",
+    # ツールバーグループ内
+    "[data-name*='linetool-group'] button[aria-label*='Fib']",
+    "[data-name*='drawing-toolbar'] button[aria-label*='Fib']",
+    # より広範囲なセレクタ
+    "button[aria-label*='Fib']",
     "button:has-text('Fib')",
     "button[aria-label*='Retracement']",
-    "button:has-text('リトレースメント')",  # 日本語ワードが違う場合はここに追加
-    "[data-name*='fib'] button, [data-name*='fib']",
+    "button:has-text('リトレースメント')",
+    # data-name属性ベース
+    "[data-name*='fib']",
+    "[data-name*='fibonacci']",
 ]
 
 
@@ -513,6 +525,7 @@ async def apply_preset(
     preset_name: str,
     clear_existing: bool = False,
     preset_path: str = "automation/indicators.json",
+    skip_params: bool = False,
 ):
     """indicators.jsonからプリセットを読み、順次 add_indicator()（冪等化対応）。"""
     # 事前にキャンバスへフォーカス
@@ -547,11 +560,14 @@ async def apply_preset(
             ok = await add_indicator(page, name)
             if ok:
                 added.append(name)
-                if params:
+                # skip_params が True の場合はパラメータ適用をスキップ（高速化）
+                if params and not skip_params:
                     # ▼ ここで歯車→値適用
                     res = await apply_indicator_params(page, name, params)
                     if not res.get("ok"):
                         print(f"[WARN] failed to apply params for {name}: {res}")
+                elif params and skip_params:
+                    print(f"[SKIP] parameter tuning skipped for {name} (fast mode)")
             else:
                 print(f"[WARN] failed to add indicator: {name}")
 
@@ -1021,20 +1037,71 @@ async def _price_to_y_converter(page):
     return price_to_y
 
 
-async def _select_fib_tool(page):
+async def _select_fib_tool(page, debug=False):
     """Fibツールを選択"""
-    # Alt+F は環境差あるので、まずはツールボタンから選択（見つからなければホットキー）
-    for sel in FIB_TOOL_BUTTONS:
+    if debug:
+        print("🔧 フィボナッチツール選択開始...")
+
+    # 1) 描画ツールバーを表示させる（左側のツールバーアイコンをクリック）
+    drawing_toolbar_selectors = [
+        "button[aria-label*='Drawing']",
+        "button[aria-label*='Tools']",
+        "button[data-name*='drawing']",
+        "button[data-name*='toolbar']",
+        "[data-name='drawing-toolbar-button']",
+        "[data-name='left-toolbar'] button",
+    ]
+
+    if debug:
+        print("🎨 描画ツールバー表示を試行...")
+    for sel in drawing_toolbar_selectors:
         try:
-            await page.locator(sel).first.click(timeout=1200)
-            return True
+            await page.locator(sel).first.click(timeout=800, force=True)
+            if debug:
+                print(f"✅ 描画ツールバー表示成功: {sel}")
+            break
         except Exception:
             continue
-    # フォールバック：Alt+F
+
+    # 少し待機してツールバーが表示されるのを待つ
+    await page.wait_for_timeout(500)
+
+    # 2) フィボナッチツールボタンを探してクリック
+    for i, sel in enumerate(FIB_TOOL_BUTTONS):
+        try:
+            if debug:
+                print(f"🔍 フィボツールボタン試行 {i+1}: {sel}")
+
+            # 要素の存在を確認
+            element = page.locator(sel).first
+            await element.wait_for(state="visible", timeout=1000)
+            await element.click(timeout=1200, force=True)
+
+            if debug:
+                print("✅ フィボツールボタンクリック成功")
+
+            # ツール選択が成功したかを確認
+            await page.wait_for_timeout(300)
+            if debug:
+                print("🔍 フィボツール選択状態を確認...")
+
+            return True
+        except Exception as e:
+            if debug:
+                print(f"❌ フィボツールボタン {i+1} 失敗: {e}")
+            continue
+
+    # 3) フォールバック：Alt+F
+    if debug:
+        print("🔄 Alt+Fホットキーを試行...")
     try:
         await page.keyboard.press("Alt+F")
+        if debug:
+            print("✅ Alt+F実行成功")
         return True
-    except Exception:
+    except Exception as e:
+        if debug:
+            print(f"❌ Alt+F失敗: {e}")
         return False
 
 
@@ -1068,17 +1135,35 @@ async def draw_fibo_by_prices(
         start = (x1, y_low)
         end = (x2, y_high)
 
-    ok = await _select_fib_tool(page)
+    # フィボツール選択前にページを安定させる
+    await page.wait_for_timeout(500)
+
+    ok = await _select_fib_tool(page, debug=True)
     if not ok:
         raise RuntimeError("Fib tool could not be selected")
 
+    print(f"📍 フィボ描画座標: start={start}, end={end}")
+    print(f"📊 価格範囲: high={high}, low={low}")
+
     # 描画（少しの待機を入れてからドラッグ）
     await page.wait_for_timeout(150)
+    print("🖱️ マウス移動開始...")
     await page.mouse.move(*start)
+    print(f"🖱️ マウスダウン: {start}")
     await page.mouse.down()
+    print(f"🖱️ マウスドラッグ: {start} → {end}")
     await page.mouse.move(*end, steps=20)
+    print("🖱️ マウスアップ")
     await page.mouse.up()
-    await page.wait_for_timeout(150)
+
+    # フィボナッチ描画の安定化待機（ESCキー無し）
+    print("⏳ フィボナッチ描画の安定化を待機中...")
+    await page.wait_for_timeout(2000)  # 2秒待機
+
+    # ESCキーは使わない（フィボナッチが消去される可能性があるため）
+    print("⚠️ フィボナッチ保持のためツール選択は維持...")
+
+    print("✅ フィボナッチ描画完了（ツール選択維持）")
     return {"from": start, "to": end, "high": high, "low": low}
 
 
@@ -1096,13 +1181,21 @@ async def draw_fibo_quick(page, direction: str = "high_to_low"):
         if direction == "high_to_low"
         else ((x1, y_bot), (x2, y_top))
     )
-    ok = await _select_fib_tool(page)
+    ok = await _select_fib_tool(page, debug=True)
     if not ok:
         raise RuntimeError("Fib tool could not be selected")
     await page.mouse.move(*start)
     await page.mouse.down()
     await page.mouse.move(*end, steps=20)
     await page.mouse.up()
+
+    # フィボナッチ描画の安定化待機（ESCキー無し）
+    print("⏳ クイックフィボ描画の安定化を待機中...")
+    await page.wait_for_timeout(2000)  # 2秒待機
+
+    # ESCキーは使わない（フィボナッチが消去される可能性があるため）
+    print("⚠️ フィボナッチ保持のためツール選択は維持...")
+
     return {"from": start, "to": end}
 
 

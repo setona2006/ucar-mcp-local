@@ -1,0 +1,31 @@
+{
+  "method": "tools/call",
+  "params": {
+    "name": "macro_quiettrap_report",
+    "arguments": {
+      "symbol": "USDJPY",
+      "tf": "1h",
+      "preset_name": "senior_ma_cloud",
+      "clear_existing": true,
+      "draw_fibo": true,
+      "fibo_mode": "quick",
+      "direction": "high_to_low",
+      "x_ratio_start": 0.2,
+      "x_ratio_end": 0.8,
+      "quiettrap": {
+        "side": "sell",
+        "score": 0.85,
+        "notes": [
+          "雲の下で売りサイン",
+          "フィボ61.8%付近でレジスタンス",
+          "下降トレンド継続"
+        ],
+        "footer": "QuietTrap Analysis - Demo Mode"
+      },
+      "outfile": "automation/screenshots/demo_macro_quick.png",
+      "headless": false,
+      "clean": true,
+      "skip_params": false
+    }
+  }
+}

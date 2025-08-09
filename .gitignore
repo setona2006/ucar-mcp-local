@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+.eggs/
+
+# Virtualenv
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+
+# IDE
+.vscode/
+.cursor/
+.idea/
+*.iml
+
+# Logs
+*.log
+logs/
+automation/tmp/
+
+# Playwright
+automation/storage_state.json
+playwright-report/
+test-results/
+automation/screenshots/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env vars
+.env
+.env.*
+
+# Node (もしPlaywright拡張でnpm使用時)
+node_modules/
+package-lock.json

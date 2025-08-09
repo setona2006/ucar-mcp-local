@@ -60,6 +60,45 @@
         },
         "required": ["mode"]
       }
+    },
+    {
+      "name": "macro_quiettrap_report",
+      "description": "Apply preset → draw Fibonacci (optional) → capture annotated screenshot in one shot.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "symbol":   { "type": "string", "default": "USDJPY" },
+          "tf":       { "type": "string", "default": "1h" },
+
+          "preset_name": { "type": "string", "default": "senior_ma_cloud" },
+          "clear_existing": { "type": "boolean", "default": true },
+
+          "draw_fibo":   { "type": "boolean", "default": true },
+          "fibo_mode":   { "type": "string", "enum": ["prices","quick"], "default": "prices" },
+          "high":        { "type": ["number","null"], "default": null },
+          "low":         { "type": ["number","null"], "default": null },
+          "direction":   { "type": "string", "enum": ["high_to_low","low_to_high"], "default": "high_to_low" },
+          "x_ratio_start": { "type":"number", "default": 0.25 },
+          "x_ratio_end":   { "type":"number", "default": 0.75 },
+
+          "quiettrap": {
+            "type": "object",
+            "properties": {
+              "side":  { "type": "string", "enum": ["buy","sell"], "default": "sell" },
+              "score": { "type": "number", "default": 0.8 },
+              "notes": { "type": "array", "items": { "type": "string" }, "default": [] },
+              "footer":{ "type": "string" }
+            },
+            "required": ["side"]
+          },
+
+          "outfile":  { "type": "string", "default": "automation/screenshots/macro_quiettrap.png" },
+          "headless": { "type": "boolean", "default": true },
+          "clean":    { "type": "boolean", "default": true },
+          "skip_params": { "type": "boolean", "default": false, "description": "Skip indicator parameter tuning for faster execution" }
+        },
+        "required": ["symbol","tf","preset_name","quiettrap"]
+      }
     }
   ]
 }
