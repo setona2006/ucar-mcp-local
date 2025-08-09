@@ -1,32 +1,40 @@
-# .gitignore 設定ガイド - スクリーンショット除外
+# `.gitignore` 完全ガイド（UCAR MCP Local）
 
-## 📋 概要
-自動生成されるスクリーンショットやテストファイルをGitの追跡対象から除外する設定です。
+このドキュメントは、プロジェクトで **Gitに入れないファイルを管理する方法** を、初心者でも迷わないようにまとめたものです。  
+「なぜ無視（ignore）するのか／何を無視すべきか／後から追加・変更する方法」まで一通りカバーします。
 
-## 🎯 .gitignore 更新例
+---
 
-### スクリーンショット除外設定
+## 1. `.gitignore` は何をする？（超要約）
+- Git が **履歴に入れようとするファイル** のうち、不要なものを **最初から見なかったことにする** フィルタ。
+- 例：スクリーンショット、ログ、キャッシュ、個人設定（.env など）は入れない。
+
+> 例え：**倉庫の入り口にある仕分け係**。「この段ボールは入れないでね」と伝えるリストが `.gitignore`。
+
+---
+
+## 2. 今回プロジェクトの主な除外方針
+- **自動生成物**（スクショ、レポート、キャッシュ、ログ）はコミットしない  
+- **個人依存ファイル**（.env、ローカル設定、IDE設定）はコミットしない  
+- **大容量 or 無意味な差分**（画像、バイナリ）は極力コミットしない  
+
+---
+
+## 3. 現在の `.gitignore` の主なルール（抜粋解説）
+
+### 3.1 スクリーンショット・画像系
 ```gitignore
-# === スクリーンショット・画像ファイル除外設定 ===
-# automation/screenshots フォルダ配下の全てのPNG画像を無視
+# automation/screenshots 配下の画像を全部無視
 automation/screenshots/*.png
-automation/screenshots/*.jpg
-automation/screenshots/*.jpeg
-automation/screenshots/*.gif
-
-# サブフォルダがある場合も含めて除外する
 automation/screenshots/**/*.png
+automation/screenshots/*.jpg
 automation/screenshots/**/*.jpg
+automation/screenshots/*.jpeg
 automation/screenshots/**/*.jpeg
+automation/screenshots/*.gif
 automation/screenshots/**/*.gif
 
-# 作業用一時ファイル・フォルダ
-automation/tmp/
-automation/temp/
-automation/screenshots/temp/
-automation/debug/
-
-# その他の自動生成画像ファイル
+# その他の自動生成画像（安全側の保険）
 charts/
 reports/
 output/
@@ -38,91 +46,164 @@ output/
 *.tiff
 *.webp
 ```
+- **ポイント**：`**/*` はサブフォルダも含めて無視します。  
+- 画像は差分が見えない & 容量が増えるので、成果物は**必要なときにだけ配布**（GitHub Releases や添付）推奨。
 
-### テスト・デバッグファイル除外設定
+### 3.2 Playwright や一時ファイル
 ```gitignore
-# === テスト・デバッグ用一時ファイル ===
-# テスト用JSONファイル
-test_*.json
-debug_*.json
-temp_*.json
+automation/storage_state.json    # TradingViewログインセッション
+playwright-report/
+test-results/
+automation/tmp/
+automation/temp/
+automation/screenshots/temp/
+automation/debug/
+```
+- **セッション情報**は秘匿情報なので必ず除外。  
+- テストの一時フォルダやレポートも除外。
 
-# 自動生成される設定ファイル
+### 3.3 開発環境・個人設定
+```gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# 仮想環境
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.cursor/
+.idea/
+*.iml
+
+# 環境変数
+.env
+.env.*
+```
+- `.env` は APIキーやパスワードが入る可能性あり → 絶対コミットしない。
+
+### 3.4 OS・その他
+```gitignore
+.DS_Store
+Thumbs.db
+*.log
+logs/
+cache/
+*.db
+*.sqlite*
 *_backup.*
 *_temp.*
 *.tmp
 *.temp
-
-# データベース・キャッシュファイル
-*.db
-*.sqlite
-*.sqlite3
-cache/
 ```
+- OSのゴミ（.DS_Store, Thumbs.db）や一時ファイルを横断的に除外。
 
-## 🔧 適用手順
+---
 
-### 1. .gitignore の更新
-プロジェクトのルートにある `.gitignore` を開き、上記の設定を追加します。
+## 4. すでに追跡されてしまったファイルを外すには？（超重要）
+`.gitignore` に書いただけでは、**すでにGitが追跡しているファイル** は外れません。  
+一度「キャッシュから外す」操作が必要です。
 
-### 2. 既存ファイルの追跡解除
-すでに追跡中の `.png` ファイルは `.gitignore` に追加しただけでは除外されないので、キャッシュから削除します。
-
-**PowerShell/ターミナルで実行:**
 ```bash
-# スクリーンショットフォルダの全PNGファイルを追跡対象から除外
+# 例：スクショPNGを一括で追跡解除（ローカルの実体ファイルは残る）
 git rm --cached automation/screenshots/*.png
+git rm --cached automation/screenshots/**/*.png
 
-# 他の画像ファイルも除外する場合
-git rm --cached automation/screenshots/*.jpg
-git rm --cached automation/screenshots/*.gif
-
-# テスト用JSONファイルがある場合
-git rm --cached test_*.json
-git rm --cached debug_*.json
+# 画像全般を外す（慎重に！）
+git rm --cached *.png *.jpg *.jpeg *.gif
 ```
 
-### 3. GitHub Desktop での確認
-1. **GitHub Desktop** を開く
-2. **「Changes」タブ** で不要な `.png` が削除扱いになっていることを確認
-3. **コミットメッセージ** を入力:
-   ```
-   chore: ignore generated files (screenshots, test files)
-   
-   - Add comprehensive .gitignore rules for generated images
-   - Remove existing tracked PNG files from automation/screenshots/
-   - Ignore test and debug JSON files
-   ```
-4. **コミット＆プッシュ** を実行
+その後、**コミット＆プッシュ** でリポジトリから削除（履歴からは消えませんが、以後は追跡されません）。
 
-## ✅ 効果
+> 💡 `--cached` を付ければ **ローカルのファイルは消えず**、Gitの管理から外すだけです。
 
-### 今後自動的に除外されるファイル:
-- ✅ `automation/screenshots/` 配下の全画像ファイル
-- ✅ `test_*.json`, `debug_*.json` などのテストファイル
-- ✅ `*.tmp`, `*.temp` などの一時ファイル
-- ✅ キャッシュ・データベースファイル
+---
 
-### メリット:
-- 🚀 **GitHub Desktop** に不要ファイルが表示されない
-- 📦 **リポジトリサイズ** を最小化
-- ⚡ **プッシュ速度** 向上
-- 🧹 **クリーンな変更履歴** を維持
+## 5. GitHub Desktop での確認手順
+1. `.gitignore` を更新する（保存）  
+2. GitHub Desktop の **Changes** タブを開く  
+3. 追跡中だった不要ファイルが **「削除扱い」** で表示される  
+4. コミットメッセージをつけて **Commit to main**  
+5. **Push origin** で反映
 
-## 📝 注意点
-- ローカルファイルは削除されません（`git rm --cached` は追跡のみ解除）
-- 必要な画像ファイルがある場合は、個別に `git add -f filename.png` で強制追加可能
-- サブフォルダ構造が変わった場合は、パターンを調整してください
+> 以後、同じ種類のファイルは「Changes」に出てこなくなります。
 
-## 🔄 メンテナンス
-新しいフォルダや拡張子が増えた場合は、`.gitignore` に追加パターンを登録してください。
+---
 
+## 6. 新しい除外を追加するときのコツ（パターン早見表）
+| 目的 | 例 | ルール |
+|-----|----|-------|
+| フォルダごと除外 | `automation/debug/` | `automation/debug/` |
+| そのフォルダ直下のPNGのみ | `automation/screenshots/*.png` | `automation/screenshots/*.png` |
+| サブフォルダも含むPNG | `automation/screenshots/**/*.png` | `automation/screenshots/**/*.png` |
+| 拡張子で一括除外 | すべてのJPEG | `*.jpg` / `*.jpeg` |
+| 一時ファイルの共通パターン | `_temp`, `.tmp` など | `*_temp.*`, `*.tmp` |
+| 秘密鍵や環境変数 | `.env`, `*.pem` | `.env`, `*.pem` |
+
+> **順番**：基本的に上から評価されます。後のルールで上書きしたい場合は順序を考慮してください。  
+> **例外指定**（無視から除外したい）は `!` を使います（例：`!docs/keep.png`）。
+
+---
+
+## 7. よくある落とし穴
+- `.gitignore` に追加したのに効かない → **すでに追跡済み**（→ 4章の `git rm --cached`）。  
+- サブフォルダのファイルが除外されない → `**/*` を使っていない。  
+- スクリーンショットを共有したい → **Gitに入れず**、必要なときだけ **Releaseやクラウドストレージ** で配布。  
+- 機密を誤コミットした → 早めに **履歴から削除（BFG Repo-Cleaner / git filter-repo）** を検討。
+
+---
+
+## 8. 運用・メンテの型
+- ルールを増やすときは **まずローカルで試す**（`git status` で意図通りか確認）。  
+- 共有したい生成物は **`docs/`** など専用ディレクトリに置きつつ、サイズに注意（Git LFS も検討）。  
+- `README` に **成果物の作り方**（例：GIFの生成手順）を残す。生成物そのものは極力コミットしない。  
+- 定期的に `.gitignore` を見直し、**新しい自動生成物やツール導入**に合わせて更新。
+
+---
+
+## 9. トラブル対処のミニ手順
+1. 「Changes にゴミが出続ける」→ `.gitignore` にパターン追加  
+2. 「それでも出る」→ `git rm --cached path/to/file` で追跡解除  
+3. 「消したくない」→ `--cached` を付ければローカルは残る  
+4. 「プッシュ済みを消したい」→ PRで削除し、以後 `.gitignore` で再発防止
+
+---
+
+## 10. チェックリスト（コミット前）
+- [ ] `.env` や `storage_state.json` をコミットしていない  
+- [ ] `automation/screenshots/` 配下が Changes に出ていない  
+- [ ] ローカル専用の一時フォルダ（`temp/`, `debug/`）をコミットしていない  
+- [ ] 画像や生成物は必要最小限のみ（原則コミットしない）  
+
+---
+
+## 付録：このプロジェクトで特に重要な除外（再掲）
 ```gitignore
-# 新しいフォルダ例
-automation/new_folder/
-data/exports/
+# セッション・機密
+.env
+.env.*
+automation/storage_state.json
 
-# 新しい拡張子例
-*.svg
-*.pdf
+# 画像・生成物
+automation/screenshots/**
+charts/
+reports/
+output/
+*.png *.jpg *.jpeg *.gif *.bmp *.tiff *.webp
+
+# 一時・ゴミ
+__pycache__/
+.venv/
+logs/
+cache/
+*.tmp *.temp
+.DS_Store
+Thumbs.db
 ```
+この方針を守れば、**GitHub Desktopが常にクリーン**に保てます。
+
