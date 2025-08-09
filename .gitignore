@@ -42,3 +42,5 @@ Thumbs.db
 # Node (もしPlaywright拡張でnpm使用時)
 node_modules/
 package-lock.json
+automation/screenshots/usdjpy_1h_improved.png
+automation/screenshots/usdjpy_1h_mcp.png

@@ -86,6 +86,14 @@ echo '{
 }' | python mcp/mcp_server.py
 ```
 
+## 📽️ デモ
+
+`macro_quiettrap_report`の動作デモです。プリセット適用 → フィボナッチ描画 → QuietTrap注釈付きスクリーンショットを一撃で実行する様子をご覧ください：
+
+![demo](docs/demo.gif)
+
+*WTI原油チャートでの実行例（プリセット適用 + フィボナッチ描画 + 注釈付きスクリーンショット生成）*
+
 ## 主要機能
 
 ### MCPツール一覧
@@ -95,6 +103,8 @@ echo '{
 3. **`tune_indicator`** - インジケーター設定調整
 4. **`draw_fibo`** - フィボナッチリトレースメント描画
 5. **`macro_quiettrap_report`** - 一撃マクロ（プリセット→フィボ→注釈→スクショ）
+
+📚 **詳細な仕様とパラメータ**: [Tool Reference](docs/tool_reference.md)
 
 ### プリセット
 
