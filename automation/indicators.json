@@ -1,0 +1,74 @@
+{
+  "//": "TradingView英語UIのビルトイン名を推奨。必要なら日本語名に置き換えて下さい。",
+  "rsi_vol_ma": {
+    "description": "RSI + Volume + Moving Average",
+    "indicators": [
+      "Relative Strength Index",
+      "Volume",
+      "Moving Average"
+    ]
+  },
+  "rsi_vol_ma200": {
+    "description": "RSI(14) + Volume + SMA(200)",
+    "indicators": [
+      { "name": "Relative Strength Index", "params": { "Length": 14 } },
+      "Volume",
+      { "name": "Moving Average", "params": { "Length": 200, "Source": "close" } }
+    ]
+  },
+  "ema50_200_rsi_macd": {
+    "description": "EMA(50/200) + RSI(14) + MACD(12,26,9)",
+    "indicators": [
+      { "name": "Exponential Moving Average", "params": { "Length": 50 } },
+      { "name": "Exponential Moving Average", "params": { "Length": 200 } },
+      { "name": "Relative Strength Index", "params": { "Length": 14 } },
+      { "name": "MACD", "params": { "Fast Length": 12, "Slow Length": 26, "Signal Smoothing": 9 } }
+    ]
+  },
+  "ema_rsi_macd": {
+    "description": "EMA(50/200) + RSI + MACD（EMAは追加後に期間変更してください）",
+    "indicators": [
+      "Exponential Moving Average",
+      "Exponential Moving Average",
+      "Relative Strength Index",
+      "MACD"
+    ]
+  },
+  "price_action_light": {
+    "description": "価格アクション軽量（出来高のみ）",
+    "indicators": [
+      "Volume"
+    ]
+  },
+  "ma_cloud": {
+    "description": "MAクラウド（単純移動平均を複数）",
+    "indicators": [
+      "Moving Average",
+      "Moving Average",
+      "Moving Average"
+    ]
+  },
+  "scalp_light": {
+    "description": "スキャルピング軽量（RSI + Volume）",
+    "indicators": [
+      { "name": "Relative Strength Index", "params": { "Length": 14 } },
+      "Volume"
+    ]
+  },
+  "swing_ma_cloud": {
+    "description": "スイング用MAクラウド（20/50/200）",
+    "indicators": [
+      { "name": "Moving Average", "params": { "Length": 20 } },
+      { "name": "Moving Average", "params": { "Length": 50 } },
+      { "name": "Moving Average", "params": { "Length": 200 } }
+    ]
+  },
+  "senior_ma_cloud": {
+    "description": "長老の基本構成（MA20/MA75/EMA200）",
+    "indicators": [
+      { "name": "Moving Average", "params": { "Length": 20, "Source": "close" } },
+      { "name": "Moving Average", "params": { "Length": 75, "Source": "close" } },
+      { "name": "Exponential Moving Average", "params": { "Length": 200, "Source": "close" } }
+    ]
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "name": "UCAR Local Trading Tools",
+  "version": "0.1.0",
+  "description": "Local tools for TradingView control and screenshots",
+  "tools": [
+    {
+      "name": "capture_chart",
+      "description": "Capture TradingView chart screenshot",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "symbol": {"type":"string"},
+          "tf": {"type":"string", "default":"1h"},
+          "indicators": {"type":"array","items":{"type":"string"}, "default":[]},
+          "outfile": {"type":"string","default":"automation/screenshots/shot.png"}
+        },
+        "required": ["symbol"]
+      }
+    },
+    {
+      "name": "tv_action",
+      "description": "Perform UI action on TradingView (future: draw fib, toggle indicators, etc.)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "action": {"type":"string"},
+          "args": {"type":"object"}
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "tune_indicator",
+      "description": "Open settings for an indicator and apply parameters",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {"type":"string"},
+          "params": {"type":"object"}
+        },
+        "required": ["name","params"]
+      }
+    },
+    {
+      "name": "draw_fibo",
+      "description": "Draw Fibonacci retracement by prices or quick mode",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["prices","quick"], "default": "prices" },
+          "symbol": { "type": "string", "default": "USDJPY" },
+          "tf": { "type": "string", "default": "1h" },
+          "high": { "type": ["number","null"], "default": null },
+          "low":  { "type": ["number","null"], "default": null },
+          "direction": { "type": "string", "enum": ["high_to_low","low_to_high"], "default": "high_to_low" },
+          "x_ratio_start": { "type":"number", "default": 0.25 },
+          "x_ratio_end":   { "type":"number", "default": 0.75 },
+          "outfile": { "type": "string", "default": "automation/screenshots/fibo.png" },
+          "headless": { "type": "boolean", "default": true }
+        },
+        "required": ["mode"]
+      }
+    }
+  ]
+}

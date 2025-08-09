@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ucar-trading-tools": {
+      "command": "python",
+      "args": ["mcp/mcp_server.py"],
+      "cwd": "C:\\Python\\ucar-mcp-local"
+    }
+  }
+}
+
