@@ -23,6 +23,7 @@ env.bak/
 # Logs
 *.log
 logs/
+automation/logs/
 automation/tmp/
 
 # Playwright
@@ -90,4 +91,5 @@ temp_*.json
 *.sqlite
 *.sqlite3
 cache/
+automation/cache/
 
