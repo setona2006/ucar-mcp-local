@@ -79,13 +79,27 @@ SETTINGS_OK = (
     f"{INDICATORS_DIALOG} button:has-text('OKを押す')"
 )
 
-# Fib Retracement tool (英/日/アイコン名いずれか)
+# Fib Retracement tool (英/日/アイコン・データ属性 できるだけ多くの候補)
 FIB_TOOL_BUTTONS = [
-    "button[aria-label*='Fib']",  # English
-    "button:has-text('Fib')",
+    # 具体的なデータ名/ラベル
+    "button[data-name='linetool-fib-retracement']",
+    "button[aria-label='Fib Retracement']",
+    "button[aria-label*='Fibonacci Retracement']",
+    # タイトル属性
+    "button[title*='Fib']",
+    "button[title*='Fibonacci']",
+    # 一般的なaria-label/テキスト
+    "button[aria-label*='Fib']",
     "button[aria-label*='Retracement']",
-    "button:has-text('リトレースメント')",  # 日本語ワードが違う場合はここに追加
-    "[data-name*='fib'] button, [data-name*='fib']",
+    "button:has-text('Fib')",
+    "button:has-text('リトレースメント')",
+    # ツールバーグループ内の候補
+    "[data-name*='linetool-group'] button[aria-label*='Fib']",
+    "[data-name*='drawing-toolbar'] button[aria-label*='Fib']",
+    # data-name属性ベース（広め）
+    "[data-name*='linetool-fib']",
+    "[data-name*='fib']",
+    "[data-name*='fibonacci']",
 ]
 
 # プロット領域（canvasの親パネル）
@@ -93,4 +107,33 @@ PLOT_AREA = "div[data-name='pane'] canvas"
 # 右側 価格軸（価格ラベル抽出に使う）
 PRICE_AXIS_LABELS = (
     "div[data-name='price-axis'] span, div[data-name='price-axis'] div:has(span)"
+)
+
+# ===== Drawing object settings (floating toolbar & dialog) =====
+# 浮遊ツールバーの「設定（歯車/format）」への候補
+DRAWING_SETTINGS_BUTTONS = [
+    "[data-name='floating-toolbar'] [data-name*='format']",
+    "[data-name='floating-toolbar'] button[aria-label*='Settings']",
+    "div[class*='floating-toolbar'] [data-name*='format']",
+    "div[class*='floating'] button[aria-label*='Settings']",
+]
+
+# 描画オブジェクトの設定ダイアログのルート
+DRAW_DIALOG = "div[role='dialog']"
+
+# 設定のOK/Apply
+DRAW_OK_BUTTON = (
+    f"{DRAW_DIALOG} button:has-text('OK'), "
+    f"{DRAW_DIALOG} button:has-text('Apply'), "
+    f"{DRAW_DIALOG} button:has-text('適用')"
+)
+
+# ライン太さボタン（px表記の候補）
+DRAW_LINEWIDTH_BUTTONS = (
+    f"{DRAW_DIALOG} button[aria-label*='px'], {DRAW_DIALOG} [aria-label*='px']"
+)
+
+# ラベルON/OFFのトグル候補
+DRAW_LABELS_TOGGLES = (
+    f"{DRAW_DIALOG} label:has-text('Label'), " f"{DRAW_DIALOG} label:has-text('ラベル')"
 )

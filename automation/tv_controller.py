@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 from tenacity import retry, stop_after_attempt, wait_fixed
+import contextlib
 
 load_dotenv()
 TV_STORAGE = os.getenv("TV_STORAGE", "automation/storage_state.json")
@@ -18,26 +19,31 @@ import sys
 
 sys.path.append(os.path.dirname(__file__))
 
-# Fibツールセレクタを直接定義
-FIB_TOOL_BUTTONS = [
-    # 描画ツールバーの具体的なセレクタ
-    "button[data-name='linetool-fib-retracement']",
-    "button[aria-label='Fib Retracement']",
-    "button[aria-label*='Fibonacci Retracement']",
-    "button[title*='Fib']",
-    "button[title*='Fibonacci']",
-    # ツールバーグループ内
-    "[data-name*='linetool-group'] button[aria-label*='Fib']",
-    "[data-name*='drawing-toolbar'] button[aria-label*='Fib']",
-    # より広範囲なセレクタ
-    "button[aria-label*='Fib']",
-    "button:has-text('Fib')",
-    "button[aria-label*='Retracement']",
-    "button:has-text('リトレースメント')",
-    # data-name属性ベース
-    "[data-name*='fib']",
-    "[data-name*='fibonacci']",
-]
+# Fibツールセレクタは selectors.py を優先利用（失敗時はローカル定義をフォールバック）
+try:
+    from selectors import FIB_TOOL_BUTTONS as FIB_TOOL_BUTTONS  # type: ignore
+except Exception:
+    FIB_TOOL_BUTTONS = [
+        # 具体的なデータ名/ラベル
+        "button[data-name='linetool-fib-retracement']",
+        "button[aria-label='Fib Retracement']",
+        "button[aria-label*='Fibonacci Retracement']",
+        # タイトル属性
+        "button[title*='Fib']",
+        "button[title*='Fibonacci']",
+        # 一般的なaria-label/テキスト
+        "button[aria-label*='Fib']",
+        "button[aria-label*='Retracement']",
+        "button:has-text('Fib')",
+        "button:has-text('リトレースメント')",
+        # ツールバーグループ内の候補
+        "[data-name*='linetool-group'] button[aria-label*='Fib']",
+        "[data-name*='drawing-toolbar'] button[aria-label*='Fib']",
+        # data-name属性ベース（広め）
+        "[data-name*='linetool-fib']",
+        "[data-name*='fib']",
+        "[data-name*='fibonacci']",
+    ]
 
 
 def TIMEFRAME_BUTTON(tf: str):
@@ -112,6 +118,96 @@ SETTINGS_OK = (
 )
 
 
+# ======= Anti popup (preempt + fast) =======
+# CSS/JS を初期ロードで注入して、出現を抑制＆即時クリック
+ANTI_POPUP_CSS = """
+[role="dialog"], [class*="modal"], [data-name*="popup"], [data-dialog-name*="subscription"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+"""
+
+ANTI_POPUP_JS = r"""
+(() => {
+  const prefer = [
+    /don't need/i, /no thanks/i, /not now/i, /skip/i, /close/i, /dismiss/i,
+    /閉じる/, /不要/, /キャンセル/
+  ];
+  const clickCandidates = () => {
+    const btns = Array.from(document.querySelectorAll('div[role="dialog"] button, [class*="modal"] button'));
+    for (const b of btns) {
+      const t = (b.innerText || b.textContent || '').trim();
+      if (prefer.some(r => r.test(t))) {
+        try { b.click(); } catch {}
+      }
+    }
+  };
+  // 初回 & 監視
+  clickCandidates();
+  const mo = new MutationObserver(() => clickCandidates());
+  mo.observe(document.documentElement, { childList: true, subtree: true });
+})();
+"""
+
+
+async def install_anti_popup(context):
+    """Network abort + init CSS/JS to prevent and auto-dismiss popups."""
+    # 1) 通信層で危険URLを遮断
+    await context.route(
+        "**/*",
+        lambda route: (
+            route.abort()
+            if any(
+                x in route.request.url.lower()
+                for x in [
+                    "/checkout",
+                    "/pricing",
+                    "/upgrade",
+                    "/plus",
+                    "/subscription",
+                    "/plans",
+                    "#order",
+                ]
+            )
+            else route.continue_()
+        ),
+    )
+    # 2) 読込前スクリプト（JSとCSS）を注入
+    await context.add_init_script(ANTI_POPUP_JS)
+    await context.add_init_script(
+        f"""
+        (() => {{
+          const s = document.createElement('style');
+          s.textContent = `{ANTI_POPUP_CSS}`;
+          document.documentElement.appendChild(s);
+        }})();
+        """
+    )
+
+
+async def clear_overlays_aggressively(page):
+    """重なりUI(ダイアログ/オーバーレイ/バックドロップ/オーバーラップroot)を無効化。"""
+    js = r"""
+    (() => {
+      const kill = (el) => { if (!el) return; el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; el.setAttribute('data-killed','1'); };
+      const sels = [
+        'div[role="dialog"]', '[class*="modal"]', '[class*="Modal"]',
+        '[class*="overlay"]', '[class*="Overlay"]', '[class*="backdrop"]', '[class*="Backdrop"]',
+        '[data-name*="popup"]', '[data-dialog-name]', '[data-name*="dialog"]',
+        '#overlap-manager-root > *', '#overlap-manager-root-1 > *'
+      ];
+      for (const sel of sels) { document.querySelectorAll(sel).forEach(kill); }
+      const roots = [document.getElementById('overlap-manager-root'), document.getElementById('overlap-manager-root-1')];
+      for (const r of roots) { if (!r) continue; Array.from(r.children).forEach(kill); }
+    })();
+    """
+    try:
+        await page.evaluate(js)
+    except Exception:
+        pass
+
+
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(2))
 async def ensure_chart_ready(page):
     # 1) DOM, 2) main canvas visible, 3) 軽い遅延
@@ -132,34 +228,40 @@ async def _safe_click_any(page, selectors: list[str], timeout=5000):
     return False
 
 
+async def _fibo_present_any(page) -> bool:
+    """ページ全体で代表ラベルが2つ以上見つかれば存在とみなす。"""
+    candidates = ["0.618", "0.382", "1.618", "2.618", "0.5"]
+    total = 0
+    for text in candidates:
+        try:
+            all_loc = page.locator(f"span:has-text('{text}'), div:has-text('{text}')")
+            count = await all_loc.count()
+            total += min(count, 3)
+            if total >= 2:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def open_chart(context, symbol: str):
     page = await context.new_page()
 
-    # 1) 課金/プラン遷移を通信レベルで遮断（最強の保険）
-    await context.route(
-        "**/*",
-        lambda route: (
-            route.abort()
-            if any(
-                x in route.request.url.lower()
-                for x in [
-                    "/checkout",
-                    "/pricing",
-                    "/upgrade",
-                    "/plus",
-                    "#order",
-                    "/subscription",
-                    "/plans",
-                ]
-            )
-            else route.continue_()
-        ),
-    )
+    # Anti-popup を必ず最初に仕込む（表示前に効かせる）
+    try:
+        await install_anti_popup(context)
+    except Exception:
+        pass
 
     await page.goto(CHART_URL)
     await ensure_chart_ready(page)
-    # キャンバスにフォーカス
+    # キャンバスにフォーカス & オーバーレイ強制排除
     await page.click("canvas", force=True)
+    await page.add_style_tag(content=ANTI_POPUP_CSS)
+    try:
+        await close_popups_fast(page)
+    except Exception:
+        pass
 
     # シンボル検索（複数のアプローチを試行）
     symbol_search_success = False
@@ -369,9 +471,9 @@ async def _read_numeric(page, label: str):
     return None
 
 
-async def verify_indicator_params(page, expected: dict):
+async def verify_indicator_params(page, expected: dict) -> dict:
     """設定ダイアログが開いている前提。expected={'Length':200, 'Source':'close'}"""
-    ok_map = {}
+    ok_map: dict[str, bool | None] = {}
     for k, v in expected.items():
         val = await _read_numeric(page, k)
         if val is None:
@@ -382,7 +484,7 @@ async def verify_indicator_params(page, expected: dict):
     return ok_map
 
 
-async def apply_indicator_params(page, indicator_match: str, params: dict):
+async def apply_indicator_params(page, indicator_match: str, params: dict) -> dict:
     """設定ダイアログで params を適用。例: {'Length': 200, 'Source': 'close'}"""
     opened = await open_settings_for_indicator(page, indicator_match)
     if not opened:
@@ -432,7 +534,7 @@ async def apply_indicator_params(page, indicator_match: str, params: dict):
     return {"ok": True, "applied": applied, "verified": verified}
 
 
-async def add_indicator(page, name: str, params: dict = None):
+async def add_indicator(page, name: str, params: dict | None = None):
     """インジケーターを追加（冪等化対応）"""
     # 既存チェック
     if await check_indicator_exists(page, name):
@@ -579,369 +681,158 @@ async def apply_preset(
 
 
 async def close_popups(page):
-    """TradingViewのポップアップを自動で閉じる"""
-
-    print("=== ポップアップ検出開始 ===")
-
-    # 現在のURLをチェック
-    current_url = page.url
-    print(f"🌐 現在のURL: {current_url}")
-
-    # プラン選択画面に遷移している場合は戻る
-    if "plans" in current_url.lower() or "subscription" in current_url.lower():
-        print("⚠️ プラン選択画面を検出。戻ります...")
-        try:
-            await page.go_back()
-            await page.wait_for_timeout(2000)
-            print("✅ 前のページに戻りました")
-        except Exception as e:
-            print(f"❌ ページ戻りでエラー: {e}")
-
-    # ページの内容を確認
-    try:
-        page_title = await page.title()
-        print(f"📄 ページタイトル: {page_title}")
-    except Exception as e:
-        print(f"❌ ページタイトル取得でエラー: {e}")
-
-    # ポップアップ処理前のURLを記録
-    original_url = page.url
-    print(f"🔗 処理前URL: {original_url}")
-
-    # まず、サブスクリプションポップアップの特定のテキストで検索
-    subscription_texts = [
-        "Take your subscription to the next level",
-        "subscription",
-        "upgrade",
-        "premium",
-    ]
-
-    for text in subscription_texts:
-        try:
-            # テキストを含むダイアログ内のボタンを探す
-            dialog = page.locator(f"div[role='dialog']:has-text('{text}')")
-            if await dialog.count() > 0:
-                print(f"✅ サブスクリプションポップアップを発見: {text}")
-
-                # ダイアログ内のボタンを全て取得して内容を確認
-                buttons = dialog.locator("button")
-                count = await buttons.count()
-
-                print(f"📊 ダイアログ内のボタン数: {count}")
-
-                for i in range(count):
-                    try:
-                        button = buttons.nth(i)
-                        button_text = await button.text_content()
-                        print(f"🔘 ボタン {i+1}: '{button_text}'")
-
-                        # 「Don't need」ボタンを優先的に探す
-                        if (
-                            "don't need" in button_text.lower()
-                            or "don't" in button_text.lower()
-                        ):
-                            await button.click()
-                            print(
-                                f"✅ 「Don't need」ボタンをクリックしました: {button_text}"
-                            )
-                            await page.wait_for_timeout(500)
-
-                            # URLの変化をチェック
-                            new_url = page.url
-                            if new_url != original_url:
-                                print(
-                                    f"⚠️ URLが変化しました: {original_url} → {new_url}"
-                                )
-                                print("🔄 前のURLに戻します...")
-                                try:
-                                    await page.go_back()
-                                    await page.wait_for_timeout(2000)
-                                    print("✅ 前のURLに戻りました")
-
-                                    # 2) 戻った後のチャート健全性チェック
-                                    await page.locator("canvas").first.wait_for(
-                                        state="visible", timeout=5000
-                                    )
-                                    await page.locator(
-                                        "div:has-text('Trading Panel')"
-                                    ).first.wait_for(timeout=5000)
-                                    print("✅ チャート健全性確認完了")
-                                except Exception as e:
-                                    print(f"❌ URL戻りでエラー: {e}")
-
-                            return
-
-                        # 「Show my options」ボタンは避ける
-                        if (
-                            "show my options" in button_text.lower()
-                            or "show" in button_text.lower()
-                        ):
-                            print(
-                                f"⚠️ 「Show my options」ボタンをスキップ: {button_text}"
-                            )
-                            continue
-
-                        # その他の閉じる系ボタン
-                        if any(
-                            keyword in button_text.lower()
-                            for keyword in [
-                                "close",
-                                "cancel",
-                                "dismiss",
-                                "skip",
-                                "got",
-                                "no thanks",
-                            ]
-                        ):
-                            await button.click()
-                            print(f"✅ 閉じるボタンをクリックしました: {button_text}")
-                            await page.wait_for_timeout(500)
-
-                            # URLの変化をチェック
-                            new_url = page.url
-                            if new_url != original_url:
-                                print(
-                                    f"⚠️ URLが変化しました: {original_url} → {new_url}"
-                                )
-                                print("🔄 前のURLに戻します...")
-                                try:
-                                    await page.go_back()
-                                    await page.wait_for_timeout(2000)
-                                    print("✅ 前のURLに戻りました")
-
-                                    # 2) 戻った後のチャート健全性チェック
-                                    await page.locator("canvas").first.wait_for(
-                                        state="visible", timeout=5000
-                                    )
-                                    await page.locator(
-                                        "div:has-text('Trading Panel')"
-                                    ).first.wait_for(timeout=5000)
-                                    print("✅ チャート健全性確認完了")
-                                except Exception as e:
-                                    print(f"❌ URL戻りでエラー: {e}")
-
-                            return
-
-                    except Exception as e:
-                        print(f"❌ ボタン {i+1} の処理でエラー: {e}")
-                        continue
-
-                # 全てのボタンを確認した後、最後のボタン（通常「Don't need」）をクリック
-                if count > 0:
-                    try:
-                        last_button = buttons.nth(count - 1)
-                        last_button_text = await last_button.text_content()
-                        print(f"🔄 最後のボタンをクリック: '{last_button_text}'")
-                        await last_button.click()
-                        print(f"✅ 最後のボタンをクリックしました: {last_button_text}")
-                        await page.wait_for_timeout(500)
-
-                        # URLの変化をチェック
-                        new_url = page.url
-                        if new_url != original_url:
-                            print(f"⚠️ URLが変化しました: {original_url} → {new_url}")
-                            print("🔄 前のURLに戻します...")
-                            try:
-                                await page.go_back()
-                                await page.wait_for_timeout(2000)
-                                print("✅ 前のURLに戻りました")
-
-                                # 2) 戻った後のチャート健全性チェック
-                                await page.locator("canvas").first.wait_for(
-                                    state="visible", timeout=5000
-                                )
-                                await page.locator(
-                                    "div:has-text('Trading Panel')"
-                                ).first.wait_for(timeout=5000)
-                                print("✅ チャート健全性確認完了")
-                            except Exception as e:
-                                print(f"❌ URL戻りでエラー: {e}")
-
-                        return
-                    except Exception as e:
-                        print(f"❌ 最後のボタンクリックでエラー: {e}")
-
-        except Exception as e:
-            print(f"❌ テキスト '{text}' の検索でエラー: {e}")
-            continue
-
-    # より広範囲なポップアップ検索
-    print("=== 広範囲ポップアップ検索開始 ===")
-
-    # 全てのダイアログを検索
-    try:
-        all_dialogs = page.locator("div[role='dialog']")
-        dialog_count = await all_dialogs.count()
-        print(f"🔍 検出されたダイアログ数: {dialog_count}")
-
-        for i in range(dialog_count):
-            try:
-                dialog = all_dialogs.nth(i)
-                dialog_text = await dialog.text_content()
-                print(f"📋 ダイアログ {i+1} の内容: {dialog_text[:200]}...")
-
-                # ダイアログ内のボタンを確認
-                buttons = dialog.locator("button")
-                button_count = await buttons.count()
-                print(f"🔘 ダイアログ {i+1} のボタン数: {button_count}")
-
-                for j in range(button_count):
-                    try:
-                        button = buttons.nth(j)
-                        button_text = await button.text_content()
-                        print(f"  🔘 ボタン {j+1}: '{button_text}'")
-
-                        # 「Don't need」ボタンを優先的に探す
-                        if (
-                            "don't need" in button_text.lower()
-                            or "don't" in button_text.lower()
-                        ):
-                            await button.click()
-                            print(
-                                f"✅ 「Don't need」ボタンをクリックしました: {button_text}"
-                            )
-                            await page.wait_for_timeout(500)
-
-                            # URLの変化をチェック
-                            new_url = page.url
-                            if new_url != original_url:
-                                print(
-                                    f"⚠️ URLが変化しました: {original_url} → {new_url}"
-                                )
-                                print("🔄 前のURLに戻します...")
-                                try:
-                                    await page.go_back()
-                                    await page.wait_for_timeout(2000)
-                                    print("✅ 前のURLに戻りました")
-
-                                    # 2) 戻った後のチャート健全性チェック
-                                    await page.locator("canvas").first.wait_for(
-                                        state="visible", timeout=5000
-                                    )
-                                    await page.locator(
-                                        "div:has-text('Trading Panel')"
-                                    ).first.wait_for(timeout=5000)
-                                    print("✅ チャート健全性確認完了")
-                                except Exception as e:
-                                    print(f"❌ URL戻りでエラー: {e}")
-
-                            return
-
-                        # 「Show my options」ボタンは避ける
-                        if (
-                            "show my options" in button_text.lower()
-                            or "show" in button_text.lower()
-                        ):
-                            print(
-                                f"⚠️ 「Show my options」ボタンをスキップ: {button_text}"
-                            )
-                            continue
-
-                    except Exception as e:
-                        print(f"❌ ボタン {j+1} の処理でエラー: {e}")
-                        continue
-
-            except Exception as e:
-                print(f"❌ ダイアログ {i+1} の処理でエラー: {e}")
-                continue
-
-    except Exception as e:
-        print(f"❌ 広範囲ポップアップ検索でエラー: {e}")
-
-    print("=== 通常セレクタでの検索開始 ===")
-
-    # 通常のセレクタで試行（フォールバック）
-    popup_selectors = [
-        # サブスクリプションポップアップ（エスケープ修正）
-        "div[role='dialog'] button:has-text('Don\\'t need')",
-        "div[role='dialog'] button:has-text('Don\\'t')",
-        "div[role='dialog'] button:has-text('Close')",
-        "div[role='dialog'] button:has-text('×')",
-        "div[role='dialog'] button[aria-label='Close']",
-        # より広範囲なセレクタ
-        "div[role='dialog'] button",
-        "div[class*='dialog'] button",
-        "div[class*='modal'] button",
-        # その他のポップアップ
-        "div[role='dialog'] button:has-text('Got it')",
-        "div[role='dialog'] button:has-text('Skip')",
-        "div[role='dialog'] button:has-text('Not now')",
-        "div[role='dialog'] button:has-text('Dismiss')",
-        "div[role='dialog'] button:has-text('Cancel')",
-        # 日本語UI対応
-        "div[role='dialog'] button:has-text('閉じる')",
-        "div[role='dialog'] button:has-text('キャンセル')",
-        "div[role='dialog'] button:has-text('不要')",
-        "div[role='dialog'] button:has-text('無視')",
-    ]
-
-    for selector in popup_selectors:
-        try:
-            # ポップアップが存在するかチェック
-            popup = page.locator(selector).first
-            if await popup.count() > 0:
-                await popup.wait_for(state="visible", timeout=1000)
-                await popup.click()
-                print(f"✅ ポップアップを閉じました: {selector}")
-                await page.wait_for_timeout(500)  # 閉じるアニメーション待機
-
-                # URLの変化をチェック
-                new_url = page.url
-                if new_url != original_url:
-                    print(f"⚠️ URLが変化しました: {original_url} → {new_url}")
-                    print("🔄 前のURLに戻します...")
-                    try:
-                        await page.go_back()
-                        await page.wait_for_timeout(2000)
-                        print("✅ 前のURLに戻りました")
-
-                        # 2) 戻った後のチャート健全性チェック
-                        await page.locator("canvas").first.wait_for(
-                            state="visible", timeout=5000
-                        )
-                        await page.locator(
-                            "div:has-text('Trading Panel')"
-                        ).first.wait_for(timeout=5000)
-                        print("✅ チャート健全性確認完了")
-                    except Exception as e:
-                        print(f"❌ URL戻りでエラー: {e}")
-
-                break
-        except Exception as e:
-            print(f"❌ セレクタ '{selector}' でエラー: {e}")
-            continue
-
-    print("=== Escapeキーでのフォールバック ===")
-
-    # 追加: Escapeキーでポップアップを閉じる（フォールバック）
+    """Back-compat slow closer (kept for reference). Prefer close_popups_fast."""
+    # 互換維持のため簡略化して即座にエスケープだけ打つ
     try:
         await page.keyboard.press("Escape")
-        await page.wait_for_timeout(300)
-        print("✅ Escapeキーを押しました")
-    except Exception as e:
-        print(f"❌ Escapeキーでエラー: {e}")
+        await page.wait_for_timeout(50)
+    except Exception:
+        pass
+    return
 
-    # さらに: 複数回Escapeを試行（ネストしたポップアップ対応）
-    for i in range(3):
+
+import time
+from contextlib import suppress
+
+
+async def close_popups_fast(page, budget_ms: int | None = None):
+    """並列・時間上限つきの高速ポップアップ排除。
+    budget_ms: 上限ミリ秒（環境変数 POPUP_BUDGET_MS が優先）
+    """
+    if budget_ms is None:
         try:
-            await page.keyboard.press("Escape")
-            await page.wait_for_timeout(200)
-            print(f"✅ Escapeキー {i+1}回目")
-        except Exception as e:
-            print(f"❌ Escapeキー {i+1}回目でエラー: {e}")
-            break
+            budget_ms = int(os.getenv("POPUP_BUDGET_MS", "800"))
+        except Exception:
+            budget_ms = 800
 
-    print("=== ポップアップ検出完了 ===")
+    start = time.perf_counter()
+
+    async def _click_prefer_buttons():
+        labels = [
+            "Don't need",
+            "No thanks",
+            "Not now",
+            "Skip",
+            "Close",
+            "Dismiss",
+            "閉じる",
+            "不要",
+            "キャンセル",
+        ]
+        for text in labels:
+            with suppress(Exception):
+                await page.get_by_role("button", name=text, exact=False).first.click(
+                    timeout=150
+                )
+                return True
+        # 汎用dialog内ボタン
+        with suppress(Exception):
+            await page.locator("div[role='dialog'] button").first.click(timeout=150)
+            return True
+        return False
+
+    async def _click_close_icon():
+        sels = [
+            "button[aria-label*='close']",
+            "button[title*='close']",
+            "button:has-text('×')",
+        ]
+        for s in sels:
+            with suppress(Exception):
+                await page.locator(s).first.click(timeout=120)
+                return True
+        return False
+
+    async def _spam_escape():
+        with suppress(Exception):
+            for _ in range(3):
+                await page.keyboard.press("Escape")
+            await page.wait_for_timeout(50)
+            return True
+        return False
+
+    async def _healthy():
+        try:
+            await page.locator("div[data-name='pane'] canvas").first.wait_for(
+                state="visible", timeout=200
+            )
+            return True
+        except Exception:
+            return False
+
+    tasks = [
+        asyncio.create_task(_click_prefer_buttons()),
+        asyncio.create_task(_click_close_icon()),
+        asyncio.create_task(_spam_escape()),
+    ]
+
+    try:
+        done, pending = await asyncio.wait(
+            tasks, timeout=budget_ms / 1000, return_when=asyncio.FIRST_COMPLETED
+        )
+        for p in pending:
+            p.cancel()
+    finally:
+        pass
+
+    ok = await _healthy()
+    elapsed = int((time.perf_counter() - start) * 1000)
+    print(f"[close_popups_fast] {elapsed}ms, healthy={ok}")
+    return ok
+
+
+async def go_back_if_navigated(page, original_url: str):
+    """URLが変化してしまった場合に素早く戻る（軽量待機）。"""
+    if page.url != original_url:
+        try:
+            await page.go_back()
+            await page.wait_for_load_state("domcontentloaded", timeout=800)
+        except Exception:
+            pass
 
 
 async def _get_plot_bbox(page):
     """プロット領域のバウンディングボックスを取得"""
-    # いちばん上のパネルのcanvasを使う（必要なら nth(0) を変える）
-    canvas = page.locator("canvas").first
-    box = await canvas.bounding_box()
+    # 可能ならメインチャート（最後のpaneのcanvas）を使う
+    panes = page.locator("div[data-name='pane'] canvas")
+    try:
+        count = await panes.count()
+    except Exception:
+        count = 0
+
+    target = (
+        panes.nth(count - 1) if count and count > 0 else page.locator("canvas").first
+    )
+    box = await target.bounding_box()
+    if not box or box.get("height", 0) < 80:
+        # フォールバック: 先頭canvas
+        target = page.locator("canvas").first
+        box = await target.bounding_box()
     if not box:
         raise RuntimeError("plot canvas not found")
     return box  # {x,y,width,height}
+
+
+async def _focus_plot_canvas(page):
+    """ターゲットのプロットcanvasに確実にフォーカスを当てる"""
+    panes = page.locator("div[data-name='pane'] canvas")
+    try:
+        count = await panes.count()
+    except Exception:
+        count = 0
+    target = (
+        panes.nth(count - 1) if count and count > 0 else page.locator("canvas").first
+    )
+    box = await target.bounding_box()
+    if box:
+        cx = box["x"] + box["width"] * 0.5
+        cy = box["y"] + box["height"] * 0.5
+        try:
+            await page.mouse.move(cx, cy)
+            await page.mouse.click(cx, cy, delay=40)
+        except Exception:
+            # フォールバック: 単純クリック
+            await target.click(force=True)
 
 
 async def _price_to_y_converter(page):
@@ -1024,15 +915,26 @@ async def _price_to_y_converter(page):
 
         return simple_price_to_y
 
-    # 近似：y = a*price + b（最小二乗）
-    import numpy as np
+    # 近似：y = a*price + b（最小二乗）。numpyが無ければ両端2点で近似。
+    try:
+        import numpy as np  # type: ignore
 
-    P = np.array([[p, 1.0] for p, _ in pts])
-    Y = np.array([y for _, y in pts])
-    a, b = np.linalg.lstsq(P, Y, rcond=None)[0]
+        P = np.array([[p, 1.0] for p, _ in pts])
+        Y = np.array([y for _, y in pts])
+        a, b = np.linalg.lstsq(P, Y, rcond=None)[0]
 
-    def price_to_y(price: float) -> float:
-        return float(a * price + b)
+        def price_to_y(price: float) -> float:
+            return float(a * price + b)
+
+    except Exception:
+        # フォールバック：最初と最後の点から直線近似
+        p1, y1 = pts[0]
+        p2, y2 = pts[-1]
+        a = (y2 - y1) / (p2 - p1) if p2 != p1 else 0.0
+        b = y1 - a * p1
+
+        def price_to_y(price: float) -> float:
+            return float(a * price + b)
 
     return price_to_y
 
@@ -1082,6 +984,10 @@ async def _select_fib_tool(page, debug=False):
 
             # ツール選択が成功したかを確認
             await page.wait_for_timeout(300)
+            # 念のためホットキーでもFibを指定（UI差異の吸収）
+            with contextlib.suppress(Exception):
+                await page.keyboard.press("Alt+F")
+                await page.wait_for_timeout(120)
             if debug:
                 print("🔍 フィボツール選択状態を確認...")
 
@@ -1117,12 +1023,21 @@ async def draw_fibo_by_prices(
     価格(高値/安値)を与えてフィボを描く。xはプロット幅の割合で置く。
     direction: 'high_to_low' | 'low_to_high'
     """
+    # まずポップアップを強制的に排除
+    try:
+        await page.add_style_tag(content=ANTI_POPUP_CSS)
+        await close_popups_fast(page)
+    except Exception:
+        pass
+
     box = await _get_plot_bbox(page)
     price_to_y = await _price_to_y_converter(page)
 
-    # x座標：プロット領域の内側に割合で配置
-    x1 = box["x"] + box["width"] * x_ratio_start
-    x2 = box["x"] + box["width"] * x_ratio_end
+    # x座標：右端誤選択を避けるため、デフォルトをやや左寄りに補正
+    left_ratio = max(0.12, min(0.40, x_ratio_start))
+    right_ratio = max(left_ratio + 0.20, min(0.82, x_ratio_end))
+    x1 = box["x"] + box["width"] * left_ratio
+    x2 = box["x"] + box["width"] * right_ratio
 
     # y座標：価格を正確にピクセル化
     y_high = price_to_y(high)
@@ -1135,8 +1050,14 @@ async def draw_fibo_by_prices(
         start = (x1, y_low)
         end = (x2, y_high)
 
-    # フィボツール選択前にページを安定させる
-    await page.wait_for_timeout(500)
+    # フィボツール選択前にページを安定させ、キャンバスへ明示フォーカス
+    await page.wait_for_timeout(400)
+    # 余計なフローティングUIを閉じる
+    with contextlib.suppress(Exception):
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(120)
+    await clear_overlays_aggressively(page)
+    await _focus_plot_canvas(page)
 
     ok = await _select_fib_tool(page, debug=True)
     if not ok:
@@ -1145,20 +1066,23 @@ async def draw_fibo_by_prices(
     print(f"📍 フィボ描画座標: start={start}, end={end}")
     print(f"📊 価格範囲: high={high}, low={low}")
 
-    # 描画（少しの待機を入れてからドラッグ）
+    # 描画（確実性優先: しっかりドラッグ）
     await page.wait_for_timeout(150)
     print("🖱️ マウス移動開始...")
     await page.mouse.move(*start)
+    await page.wait_for_timeout(40)
     print(f"🖱️ マウスダウン: {start}")
     await page.mouse.down()
+    await page.wait_for_timeout(100)
     print(f"🖱️ マウスドラッグ: {start} → {end}")
-    await page.mouse.move(*end, steps=20)
+    await page.mouse.move(*end, steps=36)
+    await page.wait_for_timeout(60)
     print("🖱️ マウスアップ")
     await page.mouse.up()
 
     # フィボナッチ描画の安定化待機（ESCキー無し）
     print("⏳ フィボナッチ描画の安定化を待機中...")
-    await page.wait_for_timeout(2000)  # 2秒待機
+    await page.wait_for_timeout(600)
 
     # ESCキーは使わない（フィボナッチが消去される可能性があるため）
     print("⚠️ フィボナッチ保持のためツール選択は維持...")
@@ -1171,27 +1095,88 @@ async def draw_fibo_quick(page, direction: str = "high_to_low"):
     """
     データ無しの簡易版：画面上部20%⇔下部80%を結んでフィボを引く。
     """
+    # まずポップアップを強制的に排除
+    try:
+        await page.add_style_tag(content=ANTI_POPUP_CSS)
+        await close_popups_fast(page)
+    except Exception:
+        pass
+
     box = await _get_plot_bbox(page)
-    x1 = box["x"] + box["width"] * 0.25
-    x2 = box["x"] + box["width"] * 0.75
-    y_top = box["y"] + box["height"] * 0.18
-    y_bot = box["y"] + box["height"] * 0.82
+    # オーバーレイに干渉しにくい中央寄りの広いドラッグ範囲に調整
+    x1 = box["x"] + box["width"] * 0.15
+    x2 = box["x"] + box["width"] * 0.70
+    y_top = box["y"] + box["height"] * 0.30
+    y_bot = box["y"] + box["height"] * 0.80
     start, end = (
         ((x1, y_top), (x2, y_bot))
         if direction == "high_to_low"
         else ((x1, y_bot), (x2, y_top))
     )
+    # 前処理: 余計なUIを閉じてからキャンバスへフォーカス
+    with contextlib.suppress(Exception):
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(120)
+    await clear_overlays_aggressively(page)
+    await _focus_plot_canvas(page)
+
     ok = await _select_fib_tool(page, debug=True)
     if not ok:
         raise RuntimeError("Fib tool could not be selected")
+    # ツール選択後に再度ターゲットpaneへ確実にフォーカス
+    await _focus_plot_canvas(page)
+    await page.wait_for_timeout(120)
+
+    # 既に存在していれば新規描画をスキップ（多重防止）
+    if await _fibo_present_any(page):
+        print("[skip] fib already present; skipping new draw")
+        return {"from": start, "to": end}
+
+    # しっかり目のドラッグ方式（誤確定/極小展開対策）
     await page.mouse.move(*start)
+    await page.wait_for_timeout(40)
     await page.mouse.down()
-    await page.mouse.move(*end, steps=20)
+    await page.wait_for_timeout(100)
+    await page.mouse.move(*end, steps=36)
+    await page.wait_for_timeout(60)
     await page.mouse.up()
+
+    # 描画成否を検出。失敗時のみ一度だけフォールバック（クリック方式）
+    present = await _fibo_present_near(page, start, end)
+    if not present and not await _fibo_present_any(page):
+        try:
+            await page.mouse.move(*start)
+            await page.mouse.click(*start, delay=30)
+            await page.wait_for_timeout(60)
+            await page.mouse.move(*end, steps=24)
+            await page.mouse.click(*end, delay=30)
+            await page.wait_for_timeout(180)
+        except Exception:
+            pass
+
+    # 余計な多重描画を避けるため、ここでの再試行は行わない
 
     # フィボナッチ描画の安定化待機（ESCキー無し）
     print("⏳ クイックフィボ描画の安定化を待機中...")
-    await page.wait_for_timeout(2000)  # 2秒待機
+    await page.wait_for_timeout(300)
+
+    # 存在検出に基づき、失敗時のみフォールバック・成功時はスタイル適用
+    if not await _fibo_present_near(page, start, end) and not await _fibo_present_any(
+        page
+    ):
+        try:
+            await page.mouse.move(*start)
+            await page.mouse.click(*start, delay=30)
+            await page.wait_for_timeout(60)
+            await page.mouse.move(*end, steps=24)
+            await page.mouse.click(*end, delay=30)
+            await page.wait_for_timeout(200)
+        except Exception:
+            pass
+
+    if await _fibo_present_near(page, start, end) or await _fibo_present_any(page):
+        if await _open_fibo_settings(page):
+            await _tune_fibo_style(page)
 
     # ESCキーは使わない（フィボナッチが消去される可能性があるため）
     print("⚠️ フィボナッチ保持のためツール選択は維持...")
@@ -1199,20 +1184,126 @@ async def draw_fibo_quick(page, direction: str = "high_to_low"):
     return {"from": start, "to": end}
 
 
+async def _open_fibo_settings(page) -> bool:
+    """描画直後のフローティングツールバーから設定を開く（ベストエフォート）。"""
+    try:
+        from selectors import DRAWING_SETTINGS_BUTTONS, DRAW_DIALOG
+    except Exception:
+        DRAWING_SETTINGS_BUTTONS = [
+            "[data-name='floating-toolbar'] [data-name*='format']",
+            "[data-name='floating-toolbar'] button[aria-label*='Settings']",
+        ]
+        DRAW_DIALOG = "div[role='dialog']"
+
+    for sel in DRAWING_SETTINGS_BUTTONS:
+        try:
+            await page.locator(sel).first.click(timeout=800)
+            await page.wait_for_selector(DRAW_DIALOG, timeout=1500)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def _fibo_present_near(
+    page, start: tuple[float, float], end: tuple[float, float]
+) -> bool:
+    """フィボレベルのラベル(0.618/0.382/1.618など)が描画範囲近くにあるかを検出。
+    近傍に2つ以上見つかれば存在とみなす。
+    """
+    min_x = min(start[0], end[0]) - 40
+    max_x = max(start[0], end[0]) + 40
+    min_y = min(start[1], end[1]) - 120
+    max_y = max(start[1], end[1]) + 120
+
+    candidates = [
+        "0.618",
+        "0.382",
+        "1.618",
+        "2.618",
+        "0.5",
+    ]
+
+    total = 0
+    for text in candidates:
+        try:
+            loc = page.locator(f"span:has-text('{text}'), div:has-text('{text}')").first
+            # いくつか同名要素がある場合があるので、最大10件まで走査
+            all_loc = page.locator(f"span:has-text('{text}'), div:has-text('{text}')")
+            count = await all_loc.count()
+            for i in range(min(count, 10)):
+                box = await all_loc.nth(i).bounding_box()
+                if not box:
+                    continue
+                if min_x <= box["x"] <= max_x and min_y <= box["y"] <= max_y:
+                    total += 1
+                    if total >= 2:
+                        return True
+        except Exception:
+            continue
+    return False
+
+
+async def _tune_fibo_style(page) -> bool:
+    """フィボの色/太さ/ラベルONを適用（可能な範囲で）。"""
+    try:
+        from selectors import (
+            DRAW_DIALOG,
+            DRAW_OK_BUTTON,
+            DRAW_LINEWIDTH_BUTTONS,
+            DRAW_LABELS_TOGGLES,
+        )
+    except Exception:
+        DRAW_DIALOG = "div[role='dialog']"
+        DRAW_OK_BUTTON = f"{DRAW_DIALOG} button:has-text('OK'), {DRAW_DIALOG} button:has-text('Apply')"
+        DRAW_LINEWIDTH_BUTTONS = f"{DRAW_DIALOG} button[aria-label*='px']"
+        DRAW_LABELS_TOGGLES = f"{DRAW_DIALOG} label:has-text('Label')"
+
+    ok_any = False
+    # 太さ: 3px → 2px の順で探す
+    try:
+        btn = page.locator(DRAW_LINEWIDTH_BUTTONS).first
+        await btn.click(timeout=800)
+        for px in ("3px", "2px"):
+            with contextlib.suppress(Exception):
+                await page.get_by_role("menuitem", name=px, exact=False).first.click(
+                    timeout=600
+                )
+                ok_any = True
+                break
+    except Exception:
+        pass
+
+    # ラベルON: チェック可能なトグルを探す
+    try:
+        lbl = page.locator(DRAW_LABELS_TOGGLES).first
+        await lbl.click(timeout=600)
+        ok_any = True
+    except Exception:
+        pass
+
+    # OK/Apply
+    with contextlib.suppress(Exception):
+        await page.locator(DRAW_OK_BUTTON).first.click(timeout=800)
+
+    return ok_any
+
+
 async def screenshot(page, outfile: str):
     """ポップアップを閉じてからスクショを撮る"""
-    # 3) "見えてるけど押せない"系モーダルをCSSで無効化（最終フォールバック）
-    await page.add_style_tag(
-        content="""
-      [class*='modal'], [class*='Dialog'], [role='dialog'] { display:none !important; }
-    """
-    )
-
-    # ポップアップを閉じる
-    await close_popups(page)
+    # 先に高速ポップアップ処理（上限付き） + CSS強制非表示
+    try:
+        await page.add_style_tag(content=ANTI_POPUP_CSS)
+        await close_popups_fast(page)
+    except Exception:
+        # フォールバック：軽くEscape
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
 
     # 少し待機してからスクショ
-    await page.wait_for_timeout(1000)
+    await page.wait_for_timeout(250)
 
     os.makedirs(os.path.dirname(outfile), exist_ok=True)
     await page.screenshot(path=outfile)
@@ -1262,8 +1353,10 @@ async def capture(
                 import importlib.util, sys
 
                 ap = Path(__file__).parent / "annotate.py"
-                spec = importlib.util.spec_from_file_location("annotate", ap)
-                mod = importlib.util.module_from_spec(spec)
+                spec = importlib.util.spec_from_file_location("annotate", str(ap))
+                if spec is None or spec.loader is None:
+                    raise ImportError("failed to load annotate module spec")
+                mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
                 sys.modules["annotate"] = mod
                 spec.loader.exec_module(mod)
                 annotate_quiet_trap = getattr(mod, "annotate_quiet_trap")

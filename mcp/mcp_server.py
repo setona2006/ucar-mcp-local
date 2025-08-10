@@ -14,7 +14,7 @@ from tv_controller import (
     apply_indicator_params as tv_tune,
     open_chart,
     set_timeframe,
-    close_popups,
+    close_popups_fast,
     draw_fibo_by_prices,
     draw_fibo_quick,
 )
@@ -218,9 +218,9 @@ async def handle_macro_quiettrap_report(args: dict):
 
         # 2) ポップアップ完全消去 & チャート安定化（フィボ描画前に実行）
         if clean:
-            print("🧹 フィボ描画前のポップアップ完全消去...")
+            print("🧹 フィボ描画前のポップアップ高速消去...")
             try:
-                await close_popups(page)
+                await close_popups_fast(page)
             except Exception:
                 pass
 
