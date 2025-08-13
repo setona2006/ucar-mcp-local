@@ -1,0 +1,177 @@
+﻿[
+    {
+        "path":  ".github",
+        "type":  "dir",
+        "size":  null
+    },
+    {
+        "path":  ".github\\workflows",
+        "type":  "dir",
+        "size":  null
+    },
+    {
+        "path":  "automation",
+        "type":  "dir",
+        "size":  null
+    },
+    {
+        "path":  "automation\\screenshots",
+        "type":  "dir",
+        "size":  null
+    },
+    {
+        "path":  "docs",
+        "type":  "dir",
+        "size":  null
+    },
+    {
+        "path":  "mcp",
+        "type":  "dir",
+        "size":  null
+    },
+    {
+        "path":  ".env",
+        "type":  "file",
+        "size":  154
+    },
+    {
+        "path":  ".gitattributes",
+        "type":  "file",
+        "size":  66
+    },
+    {
+        "path":  ".github\\workflows\\ci.yml",
+        "type":  "file",
+        "size":  808
+    },
+    {
+        "path":  ".github\\workflows\\readme-summary.yml",
+        "type":  "file",
+        "size":  5469
+    },
+    {
+        "path":  ".github\\workflows\\repo-tree.yml",
+        "type":  "file",
+        "size":  1558
+    },
+    {
+        "path":  ".gitignore",
+        "type":  "file",
+        "size":  1461
+    },
+    {
+        "path":  "automation\\annotate.py",
+        "type":  "file",
+        "size":  2429
+    },
+    {
+        "path":  "automation\\fibo_demo.out.txt",
+        "type":  "file",
+        "size":  1798
+    },
+    {
+        "path":  "automation\\indicators.json",
+        "type":  "file",
+        "size":  2585
+    },
+    {
+        "path":  "automation\\screenshots\\.gitkeep",
+        "type":  "file",
+        "size":  116
+    },
+    {
+        "path":  "automation\\selectors.py",
+        "type":  "file",
+        "size":  4435
+    },
+    {
+        "path":  "automation\\storage_state.json",
+        "type":  "file",
+        "size":  3845
+    },
+    {
+        "path":  "automation\\test_preset.py",
+        "type":  "file",
+        "size":  913
+    },
+    {
+        "path":  "automation\\test_preset_v2.py",
+        "type":  "file",
+        "size":  925
+    },
+    {
+        "path":  "automation\\test_senior_preset.py",
+        "type":  "file",
+        "size":  957
+    },
+    {
+        "path":  "automation\\tv_controller.py",
+        "type":  "file",
+        "size":  53129
+    },
+    {
+        "path":  "automation\\tv_controller_simple.py",
+        "type":  "file",
+        "size":  4836
+    },
+    {
+        "path":  "automation\\tv_login.py",
+        "type":  "file",
+        "size":  1353
+    },
+    {
+        "path":  "automation\\tv_login_debug.py",
+        "type":  "file",
+        "size":  2379
+    },
+    {
+        "path":  "docs\\gitignore-setup.md",
+        "type":  "file",
+        "size":  7538
+    },
+    {
+        "path":  "docs\\tool_reference.md",
+        "type":  "file",
+        "size":  2806
+    },
+    {
+        "path":  "env.example",
+        "type":  "file",
+        "size":  154
+    },
+    {
+        "path":  "invoke_ucar.py",
+        "type":  "file",
+        "size":  6734
+    },
+    {
+        "path":  "mcp.json",
+        "type":  "file",
+        "size":  177
+    },
+    {
+        "path":  "mcp\\manifest.json",
+        "type":  "file",
+        "size":  4306
+    },
+    {
+        "path":  "mcp\\mcp_server.py",
+        "type":  "file",
+        "size":  13158
+    },
+    {
+        "path":  "README.md",
+        "type":  "file",
+        "size":  4706
+    },
+    {
+        "path":  "requirements.txt",
+        "type":  "file",
+        "size":  89
+    },
+    {
+        "path":  "test_macro_quick.json",
+        "type":  "file",
+        "size":  779
+    }
+]

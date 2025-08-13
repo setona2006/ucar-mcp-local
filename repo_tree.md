@@ -1,0 +1,37 @@
+﻿# Repository Tree
+
+-  .github
+  -  .github\workflows
+-  automation
+  -  automation\screenshots
+-  docs
+-  mcp
+-  .env (0.2 KB)
+-  .gitattributes (0.1 KB)
+    -  .github\workflows\ci.yml (0.8 KB)
+    -  .github\workflows\readme-summary.yml (5.3 KB)
+    -  .github\workflows\repo-tree.yml (1.5 KB)
+-  .gitignore (1.4 KB)
+  -  automation\annotate.py (2.4 KB)
+  -  automation\fibo_demo.out.txt (1.8 KB)
+  -  automation\indicators.json (2.5 KB)
+    -  automation\screenshots\.gitkeep (0.1 KB)
+  -  automation\selectors.py (4.3 KB)
+  -  automation\storage_state.json (3.8 KB)
+  -  automation\test_preset.py (0.9 KB)
+  -  automation\test_preset_v2.py (0.9 KB)
+  -  automation\test_senior_preset.py (0.9 KB)
+  -  automation\tv_controller.py (51.9 KB)
+  -  automation\tv_controller_simple.py (4.7 KB)
+  -  automation\tv_login.py (1.3 KB)
+  -  automation\tv_login_debug.py (2.3 KB)
+  -  docs\gitignore-setup.md (7.4 KB)
+  -  docs\tool_reference.md (2.7 KB)
+-  env.example (0.2 KB)
+-  invoke_ucar.py (6.6 KB)
+-  mcp.json (0.2 KB)
+  -  mcp\manifest.json (4.2 KB)
+  -  mcp\mcp_server.py (12.8 KB)
+-  README.md (4.6 KB)
+-  requirements.txt (0.1 KB)
+-  test_macro_quick.json (0.8 KB)
