@@ -1,0 +1,58 @@
+﻿name: Build Repo Tree
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  tree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate repo_tree.json and repo_tree.md
+        run: |
+          python3 - <<'PY'
+import os, json, pathlib
+root = pathlib.Path('.')
+tree = []
+for p in root.rglob('*'):
+    if '.git' in p.parts:
+        continue
+    kind = 'dir' if p.is_dir() else 'file'
+    tree.append({
+        'path': str(p.relative_to(root)),
+        'type': kind,
+        'size': (p.stat().st_size if p.is_file() else None)
+    })
+tree.sort(key=lambda x: (x['type']!='dir', x['path'].lower()))
+with open('repo_tree.json','w',encoding='utf-8') as f:
+    json.dump(tree,f,ensure_ascii=False,indent=2)
+
+def indent(path: str) -> str:
+    depth = path.count(os.sep)
+    return '  ' * depth
+
+lines = ['# Repository Tree\n']
+for item in tree:
+    p = item['path']
+    if p == '.':
+        continue
+    if item['type']=='dir':
+        lines.append(f"{indent(p)}-  {p}")
+    else:
+        size = item['size']
+        kb = f" ({size/1024:.1f} KB)" if size is not None else ''
+        lines.append(f"{indent(p)}-  {p}{kb}")
+with open('repo_tree.md','w',encoding='utf-8') as f:
+    f.write('\n'.join(lines))
+PY
+
+      - name: Commit tree files
+        run: |
+          git config user.name "repo-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add repo_tree.json repo_tree.md
+          git diff --cached --quiet || git commit -m "chore: update repo tree"
+          git push
