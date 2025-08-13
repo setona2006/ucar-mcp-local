@@ -108,32 +108,3 @@ PLOT_AREA = "div[data-name='pane'] canvas"
 PRICE_AXIS_LABELS = (
     "div[data-name='price-axis'] span, div[data-name='price-axis'] div:has(span)"
 )
-
-# ===== Drawing object settings (floating toolbar & dialog) =====
-# 浮遊ツールバーの「設定（歯車/format）」への候補
-DRAWING_SETTINGS_BUTTONS = [
-    "[data-name='floating-toolbar'] [data-name*='format']",
-    "[data-name='floating-toolbar'] button[aria-label*='Settings']",
-    "div[class*='floating-toolbar'] [data-name*='format']",
-    "div[class*='floating'] button[aria-label*='Settings']",
-]
-
-# 描画オブジェクトの設定ダイアログのルート
-DRAW_DIALOG = "div[role='dialog']"
-
-# 設定のOK/Apply
-DRAW_OK_BUTTON = (
-    f"{DRAW_DIALOG} button:has-text('OK'), "
-    f"{DRAW_DIALOG} button:has-text('Apply'), "
-    f"{DRAW_DIALOG} button:has-text('適用')"
-)
-
-# ライン太さボタン（px表記の候補）
-DRAW_LINEWIDTH_BUTTONS = (
-    f"{DRAW_DIALOG} button[aria-label*='px'], {DRAW_DIALOG} [aria-label*='px']"
-)
-
-# ラベルON/OFFのトグル候補
-DRAW_LABELS_TOGGLES = (
-    f"{DRAW_DIALOG} label:has-text('Label'), " f"{DRAW_DIALOG} label:has-text('ラベル')"
-)

@@ -28,6 +28,8 @@ except Exception:
         "button[data-name='linetool-fib-retracement']",
         "button[aria-label='Fib Retracement']",
         "button[aria-label*='Fibonacci Retracement']",
+        "[data-name='linetool-fib-retracement']",
+        "[data-name*='fib-retracement']",
         # タイトル属性
         "button[title*='Fib']",
         "button[title*='Fibonacci']",
@@ -36,6 +38,9 @@ except Exception:
         "button[aria-label*='Retracement']",
         "button:has-text('Fib')",
         "button:has-text('リトレースメント')",
+        "[role='button'][aria-label*='Fib']",
+        "div[role='toolbar'] [aria-label*='Fib']",
+        "[class*='button']:has-text('Fib')",
         # ツールバーグループ内の候補
         "[data-name*='linetool-group'] button[aria-label*='Fib']",
         "[data-name*='drawing-toolbar'] button[aria-label*='Fib']",
@@ -186,26 +191,159 @@ async def install_anti_popup(context):
     )
 
 
+async def _set_overlap_pointer_events(page, enable: bool):
+    """Temporarily disable pointer events on overlap-manager to avoid intercepts."""
+    css_id = "ucar-kill-overlap"
+    if enable:
+        css = """
+        #overlap-manager-root, #overlap-manager-root-1,
+        #overlap-manager-root *, #overlap-manager-root-1 * {
+          pointer-events: none !important;
+        }
+        """
+        await page.add_style_tag(content=css, id=css_id)
+    else:
+        # Remove previously injected style
+        await page.evaluate(
+            """
+            (id) => {
+              const el = document.getElementById(id);
+              if (el && el.parentElement) el.parentElement.removeChild(el);
+            }
+            """,
+            css_id,
+        )
+
+
 async def clear_overlays_aggressively(page):
-    """重なりUI(ダイアログ/オーバーレイ/バックドロップ/オーバーラップroot)を無効化。"""
+    """Remove common dialogs/backdrops/overlays that may intercept pointer."""
     js = r"""
     (() => {
       const kill = (el) => { if (!el) return; el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; el.setAttribute('data-killed','1'); };
       const sels = [
-        'div[role="dialog"]', '[class*="modal"]', '[class*="Modal"]',
-        '[class*="overlay"]', '[class*="Overlay"]', '[class*="backdrop"]', '[class*="Backdrop"]',
+        'div[role="dialog"]', '[class*="modal"]', '[class*="overlay"]', '[class*="backdrop"]',
         '[data-name*="popup"]', '[data-dialog-name]', '[data-name*="dialog"]',
         '#overlap-manager-root > *', '#overlap-manager-root-1 > *'
       ];
-      for (const sel of sels) { document.querySelectorAll(sel).forEach(kill); }
-      const roots = [document.getElementById('overlap-manager-root'), document.getElementById('overlap-manager-root-1')];
-      for (const r of roots) { if (!r) continue; Array.from(r.children).forEach(kill); }
+      for (const sel of sels) document.querySelectorAll(sel).forEach(kill);
     })();
     """
     try:
         await page.evaluate(js)
     except Exception:
         pass
+
+
+async def _toggle_overlap_hidden(page, enable: bool):
+    """Hide/show overlap-manager roots entirely to avoid any intercepts."""
+    css_id = "ucar-hide-overlap"
+    if enable:
+        css = """
+        #overlap-manager-root, #overlap-manager-root-1 {
+          display: none !important;
+        }
+        """
+        await page.evaluate(
+            """
+            (id, css) => {
+              let s = document.getElementById(id);
+              if (!s) {
+                s = document.createElement('style');
+                s.id = id;
+                document.documentElement.appendChild(s);
+              }
+              s.textContent = css;
+            }
+            """,
+            css_id,
+            css,
+        )
+    else:
+        await page.evaluate(
+            """
+            (id) => {
+              const s = document.getElementById(id);
+              if (s && s.parentElement) s.parentElement.removeChild(s);
+            }
+            """,
+            css_id,
+        )
+
+
+async def _lock_last_drawing(page):
+    """選択中の描画オブジェクトをロック（浮遊ツールバーの鍵アイコンをクリック）。"""
+    candidates = [
+        "[data-name='floating-toolbar'] [data-name*='lock']",
+        "[data-name='floating-toolbar'] button[aria-label*='Lock']",
+        "[data-name='floating-toolbar'] [class*='lock']",
+    ]
+    for sel in candidates:
+        try:
+            await page.locator(sel).first.click(timeout=600, force=True)
+            await page.wait_for_timeout(120)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def _wait_floating_toolbar(page, timeout=1500) -> bool:
+    try:
+        await page.locator("[data-name='floating-toolbar']").first.wait_for(
+            state="visible", timeout=timeout
+        )
+        return True
+    except Exception:
+        return False
+
+
+async def _lock_by_context_menu(page, at_x: float, at_y: float) -> bool:
+    try:
+        await page.mouse.move(at_x, at_y)
+        await page.mouse.click(at_x, at_y, button="right")
+        menu_sel = "div[role='menu'] div:has-text('Lock'), div[role='menu'] div:has-text('ロック')"
+        await page.locator(menu_sel).first.click(timeout=1000)
+        await page.wait_for_timeout(150)
+        return True
+    except Exception:
+        return False
+
+
+async def _lock_all_drawings_toggle(page, enable: bool) -> bool:
+    """左ツールバーの全描画ロック切り替え（UI差分に対し複数候補）。"""
+    selectors = [
+        "[aria-label*='Lock all drawings']",
+        "[aria-label*='Lock All']",
+        "[data-name*='lock-all']",
+        "button:has-text('Lock all')",
+        "button:has-text('すべてロック')",
+    ]
+    for sel in selectors:
+        try:
+            btn = page.locator(sel).first
+            await btn.wait_for(state="visible", timeout=800)
+            # 状態判定は難しいため2回押して戻す方法は避け、enable=Trueなら一度押す前に右クリックメニューでLock AllがONか確認…は重いので簡易化
+            await btn.click(timeout=800, force=True)
+            await page.wait_for_timeout(120)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def _js_force_click(page, selector: str, timeout_ms: int = 1500) -> bool:
+    """Click by executing element.click() in page context to bypass pointer intercepts."""
+    try:
+        el = page.locator(selector).first
+        await el.wait_for(state="attached", timeout=timeout_ms)
+        # Ensure in DOM then click via JS
+        await page.evaluate(
+            "el => { try { el.click(); } catch(e) {} }",
+            await el.element_handle(),
+        )
+        return True
+    except Exception:
+        return False
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(2))
@@ -223,22 +361,6 @@ async def _safe_click_any(page, selectors: list[str], timeout=5000):
             await loc.wait_for(state="visible", timeout=timeout)
             await loc.click()
             return True
-        except Exception:
-            continue
-    return False
-
-
-async def _fibo_present_any(page) -> bool:
-    """ページ全体で代表ラベルが2つ以上見つかれば存在とみなす。"""
-    candidates = ["0.618", "0.382", "1.618", "2.618", "0.5"]
-    total = 0
-    for text in candidates:
-        try:
-            all_loc = page.locator(f"span:has-text('{text}'), div:has-text('{text}')")
-            count = await all_loc.count()
-            total += min(count, 3)
-            if total >= 2:
-                return True
         except Exception:
             continue
     return False
@@ -471,7 +593,7 @@ async def _read_numeric(page, label: str):
     return None
 
 
-async def verify_indicator_params(page, expected: dict) -> dict:
+async def verify_indicator_params(page, expected: dict) -> dict[str, bool | None]:
     """設定ダイアログが開いている前提。expected={'Length':200, 'Source':'close'}"""
     ok_map: dict[str, bool | None] = {}
     for k, v in expected.items():
@@ -967,8 +1089,17 @@ async def _select_fib_tool(page, debug=False):
 
     # 少し待機してツールバーが表示されるのを待つ
     await page.wait_for_timeout(500)
+    # オーバーレイ（overlap-manager配下など）を無効化
+    with contextlib.suppress(Exception):
+        await clear_overlays_aggressively(page)
+        await _toggle_overlap_hidden(page, True)
 
     # 2) フィボナッチツールボタンを探してクリック
+    # オーバーレイのポインター遮断を一時的にOFF
+    try:
+        await _set_overlap_pointer_events(page, True)
+    except Exception:
+        pass
     for i, sel in enumerate(FIB_TOOL_BUTTONS):
         try:
             if debug:
@@ -976,20 +1107,30 @@ async def _select_fib_tool(page, debug=False):
 
             # 要素の存在を確認
             element = page.locator(sel).first
-            await element.wait_for(state="visible", timeout=1000)
-            await element.click(timeout=1200, force=True)
+            await element.wait_for(state="attached", timeout=1200)
+            with contextlib.suppress(Exception):
+                await element.scroll_into_view_if_needed(timeout=500)
+            await element.wait_for(state="visible", timeout=1200)
+            # 強制クリック試行 → ダメならJS clickで貫通
+            try:
+                await element.click(timeout=1800, force=True)
+            except Exception:
+                _ = await _js_force_click(page, sel, timeout_ms=1200)
 
             if debug:
                 print("✅ フィボツールボタンクリック成功")
 
-            # ツール選択が成功したかを確認
-            await page.wait_for_timeout(300)
-            # 念のためホットキーでもFibを指定（UI差異の吸収）
-            with contextlib.suppress(Exception):
-                await page.keyboard.press("Alt+F")
+            # ツール選択が成功したかを確認 + Alt+F 追撃
+            for _ in range(3):
+                with contextlib.suppress(Exception):
+                    await page.keyboard.press("Alt+F")
                 await page.wait_for_timeout(120)
             if debug:
                 print("🔍 フィボツール選択状態を確認...")
+            with contextlib.suppress(Exception):
+                await page.screenshot(
+                    path="automation/screenshots/debug_fib_selected.png"
+                )
 
             return True
         except Exception as e:
@@ -1001,14 +1142,60 @@ async def _select_fib_tool(page, debug=False):
     if debug:
         print("🔄 Alt+Fホットキーを試行...")
     try:
-        await page.keyboard.press("Alt+F")
+        # 3-1) グループメニューから直接選択（最後の手段）
+        try:
+            group_sels = [
+                "[data-name='linetool-group-gann-and-fibonacci']",
+                "div[data-name*='gann-and-fibonacci']",
+            ]
+            opened = False
+            for gs in group_sels:
+                try:
+                    if debug:
+                        print(f"🧰 Gann/Fibonacci グループ開く: {gs}")
+                    if not await _js_force_click(page, gs, timeout_ms=1000):
+                        await page.locator(gs).first.click(timeout=1000, force=True)
+                    await page.wait_for_timeout(200)
+                    opened = True
+                    break
+                except Exception:
+                    continue
+            if opened:
+                menu_targets = [
+                    "[data-name='linetool-fib-retracement']",
+                    "button[aria-label='Fib Retracement']",
+                    "button[aria-label*='Fibonacci']",
+                ]
+                for mt in menu_targets:
+                    if await _js_force_click(page, mt, timeout_ms=800):
+                        if debug:
+                            print("✅ グループ内からFib選択(JS)")
+                        return True
+                    with contextlib.suppress(Exception):
+                        await page.locator(mt).first.click(timeout=800, force=True)
+                        if debug:
+                            print("✅ グループ内からFib選択(Click)")
+                        return True
+        except Exception as ee:
+            if debug:
+                print(f"⚠️ グループ選択フォールバック失敗: {ee}")
+
+        # 3-2) 最後にキーバインドを数回送る（UI差異の吸収）
+        for _ in range(3):
+            with contextlib.suppress(Exception):
+                await page.keyboard.press("Alt+F")
+            await page.wait_for_timeout(120)
         if debug:
-            print("✅ Alt+F実行成功")
+            print("✅ Alt+F多重送信完了")
         return True
     except Exception as e:
         if debug:
             print(f"❌ Alt+F失敗: {e}")
         return False
+    finally:
+        with contextlib.suppress(Exception):
+            await _set_overlap_pointer_events(page, False)
+            await _toggle_overlap_hidden(page, False)
 
 
 async def draw_fibo_by_prices(
@@ -1033,11 +1220,9 @@ async def draw_fibo_by_prices(
     box = await _get_plot_bbox(page)
     price_to_y = await _price_to_y_converter(page)
 
-    # x座標：右端誤選択を避けるため、デフォルトをやや左寄りに補正
-    left_ratio = max(0.12, min(0.40, x_ratio_start))
-    right_ratio = max(left_ratio + 0.20, min(0.82, x_ratio_end))
-    x1 = box["x"] + box["width"] * left_ratio
-    x2 = box["x"] + box["width"] * right_ratio
+    # x座標：プロット領域の内側に割合で配置
+    x1 = box["x"] + box["width"] * x_ratio_start
+    x2 = box["x"] + box["width"] * x_ratio_end
 
     # y座標：価格を正確にピクセル化
     y_high = price_to_y(high)
@@ -1056,9 +1241,11 @@ async def draw_fibo_by_prices(
     with contextlib.suppress(Exception):
         await page.keyboard.press("Escape")
         await page.wait_for_timeout(120)
-    await clear_overlays_aggressively(page)
     await _focus_plot_canvas(page)
 
+    # オーバーレイを完全に隠してから選択
+    with contextlib.suppress(Exception):
+        await _toggle_overlap_hidden(page, True)
     ok = await _select_fib_tool(page, debug=True)
     if not ok:
         raise RuntimeError("Fib tool could not be selected")
@@ -1066,23 +1253,58 @@ async def draw_fibo_by_prices(
     print(f"📍 フィボ描画座標: start={start}, end={end}")
     print(f"📊 価格範囲: high={high}, low={low}")
 
-    # 描画（確実性優先: しっかりドラッグ）
+    # 描画（少しの待機を入れてからドラッグ）
     await page.wait_for_timeout(150)
     print("🖱️ マウス移動開始...")
-    await page.mouse.move(*start)
-    await page.wait_for_timeout(40)
-    print(f"🖱️ マウスダウン: {start}")
-    await page.mouse.down()
-    await page.wait_for_timeout(100)
-    print(f"🖱️ マウスドラッグ: {start} → {end}")
-    await page.mouse.move(*end, steps=36)
-    await page.wait_for_timeout(60)
-    print("🖱️ マウスアップ")
-    await page.mouse.up()
+    # キャンバス直上でのヒットを確実化するため、JSで canvas に mousedown/mousemove/mouseup を発火
+    try:
+        await page.evaluate(
+            """
+            (startX, startY, endX, endY) => {
+              function fire(type, x, y) {
+                const el = document.elementFromPoint(x, y);
+                if (!el) return;
+                const ev = new MouseEvent(type, {bubbles:true, cancelable:true, clientX:x, clientY:y});
+                el.dispatchEvent(ev);
+              }
+              fire('mousedown', startX, startY);
+              fire('mousemove', endX, endY);
+              fire('mouseup', endX, endY);
+            }
+            """,
+            start[0],
+            start[1],
+            end[0],
+            end[1],
+        )
+    except Exception:
+        # フォールバックに物理ドラッグ
+        try:
+            await _set_overlap_pointer_events(page, True)
+        except Exception:
+            pass
+        try:
+            await page.mouse.move(*start)
+            await page.mouse.down()
+            await page.mouse.move(*end, steps=20)
+            await page.mouse.up()
+        finally:
+            with contextlib.suppress(Exception):
+                await _set_overlap_pointer_events(page, False)
+
+    # もし反応がなければ微妙にずらしてもう一度ドラッグ
+    await page.wait_for_timeout(300)
+    try:
+        await page.mouse.move(start[0] + 6, start[1] + 6)
+        await page.mouse.down()
+        await page.mouse.move(end[0] + 6, end[1] + 6, steps=12)
+        await page.mouse.up()
+    except Exception:
+        pass
 
     # フィボナッチ描画の安定化待機（ESCキー無し）
     print("⏳ フィボナッチ描画の安定化を待機中...")
-    await page.wait_for_timeout(600)
+    await page.wait_for_timeout(2000)  # 2秒待機
 
     # ESCキーは使わない（フィボナッチが消去される可能性があるため）
     print("⚠️ フィボナッチ保持のためツール選択は維持...")
@@ -1095,19 +1317,15 @@ async def draw_fibo_quick(page, direction: str = "high_to_low"):
     """
     データ無しの簡易版：画面上部20%⇔下部80%を結んでフィボを引く。
     """
-    # まずポップアップを強制的に排除
-    try:
-        await page.add_style_tag(content=ANTI_POPUP_CSS)
-        await close_popups_fast(page)
-    except Exception:
-        pass
+    # Safeモード: 描画中は余計なCSS/ポップアップ介入を行わない（メニューが消える/遮られる対策）
+    print("[safe-mode] draw_fibo_quick: skip extra CSS/close during drawing phase")
 
     box = await _get_plot_bbox(page)
-    # オーバーレイに干渉しにくい中央寄りの広いドラッグ範囲に調整
-    x1 = box["x"] + box["width"] * 0.15
-    x2 = box["x"] + box["width"] * 0.70
-    y_top = box["y"] + box["height"] * 0.30
-    y_bot = box["y"] + box["height"] * 0.80
+    # オーバーレイに干渉しにくい中央寄りの広いドラッグ範囲に変更
+    x1 = box["x"] + box["width"] * 0.10
+    x2 = box["x"] + box["width"] * 0.90
+    y_top = box["y"] + box["height"] * 0.25
+    y_bot = box["y"] + box["height"] * 0.85
     start, end = (
         ((x1, y_top), (x2, y_bot))
         if direction == "high_to_low"
@@ -1117,66 +1335,78 @@ async def draw_fibo_quick(page, direction: str = "high_to_low"):
     with contextlib.suppress(Exception):
         await page.keyboard.press("Escape")
         await page.wait_for_timeout(120)
-    await clear_overlays_aggressively(page)
     await _focus_plot_canvas(page)
 
     ok = await _select_fib_tool(page, debug=True)
     if not ok:
         raise RuntimeError("Fib tool could not be selected")
-    # ツール選択後に再度ターゲットpaneへ確実にフォーカス
-    await _focus_plot_canvas(page)
-    await page.wait_for_timeout(120)
-
-    # 既に存在していれば新規描画をスキップ（多重防止）
-    if await _fibo_present_any(page):
-        print("[skip] fib already present; skipping new draw")
-        return {"from": start, "to": end}
-
-    # しっかり目のドラッグ方式（誤確定/極小展開対策）
-    await page.mouse.move(*start)
-    await page.wait_for_timeout(40)
-    await page.mouse.down()
-    await page.wait_for_timeout(100)
-    await page.mouse.move(*end, steps=36)
-    await page.wait_for_timeout(60)
-    await page.mouse.up()
-
-    # 描画成否を検出。失敗時のみ一度だけフォールバック（クリック方式）
-    present = await _fibo_present_near(page, start, end)
-    if not present and not await _fibo_present_any(page):
+    try:
+        await page.evaluate(
+            """
+            (startX, startY, endX, endY) => {
+              function fire(type, x, y) {
+                const el = document.elementFromPoint(x, y);
+                if (!el) return;
+                const ev = new MouseEvent(type, {bubbles:true, cancelable:true, clientX:x, clientY:y});
+                el.dispatchEvent(ev);
+              }
+              fire('mousedown', startX, startY);
+              fire('mousemove', endX, endY);
+              fire('mouseup', endX, endY);
+            }
+            """,
+            start[0],
+            start[1],
+            end[0],
+            end[1],
+        )
+    except Exception:
+        with contextlib.suppress(Exception):
+            await _set_overlap_pointer_events(page, True)
         try:
             await page.mouse.move(*start)
-            await page.mouse.click(*start, delay=30)
-            await page.wait_for_timeout(60)
-            await page.mouse.move(*end, steps=24)
-            await page.mouse.click(*end, delay=30)
-            await page.wait_for_timeout(180)
-        except Exception:
-            pass
+            await page.mouse.down()
+            await page.mouse.move(*end, steps=20)
+            await page.mouse.up()
+        finally:
+            with contextlib.suppress(Exception):
+                await _set_overlap_pointer_events(page, False)
 
-    # 余計な多重描画を避けるため、ここでの再試行は行わない
+    # 念のため2回目の微調整ドラッグ
+    await page.wait_for_timeout(250)
+    with contextlib.suppress(Exception):
+        await page.mouse.move(start[0] + 6, start[1] + 6)
+        await page.mouse.down()
+        await page.mouse.move(end[0] + 6, end[1] + 6, steps=12)
+        await page.mouse.up()
 
-    # フィボナッチ描画の安定化待機（ESCキー無し）
+    # フィボナッチ描画の安定化待機（短縮）
     print("⏳ クイックフィボ描画の安定化を待機中...")
-    await page.wait_for_timeout(300)
+    await page.wait_for_timeout(400)
 
-    # 存在検出に基づき、失敗時のみフォールバック・成功時はスタイル適用
-    if not await _fibo_present_near(page, start, end) and not await _fibo_present_any(
-        page
-    ):
-        try:
-            await page.mouse.move(*start)
-            await page.mouse.click(*start, delay=30)
-            await page.wait_for_timeout(60)
-            await page.mouse.move(*end, steps=24)
-            await page.mouse.click(*end, delay=30)
-            await page.wait_for_timeout(200)
-        except Exception:
-            pass
+    # ロック優先手順
+    locked = False
+    if await _wait_floating_toolbar(page, timeout=1200):
+        with contextlib.suppress(Exception):
+            locked = await _lock_last_drawing(page)
+    if not locked:
+        mid_x = (start[0] + end[0]) / 2.0
+        mid_y = (start[1] + end[1]) / 2.0
+        if await _lock_by_context_menu(page, mid_x, mid_y):
+            locked = True
+    if not locked:
+        with contextlib.suppress(Exception):
+            locked = await _lock_all_drawings_toggle(page, enable=True)
+    print("🔒 ロック状態:", locked)
+    await page.wait_for_timeout(400)
 
-    if await _fibo_present_near(page, start, end) or await _fibo_present_any(page):
-        if await _open_fibo_settings(page):
-            await _tune_fibo_style(page)
+    # オーバーレイを元に戻す
+    with contextlib.suppress(Exception):
+        await _toggle_overlap_hidden(page, False)
+
+    # デバッグ: フィボオブジェクト存在確認のためのスクショ
+    with contextlib.suppress(Exception):
+        await page.screenshot(path="automation/screenshots/debug_fib_after_draw.png")
 
     # ESCキーは使わない（フィボナッチが消去される可能性があるため）
     print("⚠️ フィボナッチ保持のためツール選択は維持...")
@@ -1184,123 +1414,12 @@ async def draw_fibo_quick(page, direction: str = "high_to_low"):
     return {"from": start, "to": end}
 
 
-async def _open_fibo_settings(page) -> bool:
-    """描画直後のフローティングツールバーから設定を開く（ベストエフォート）。"""
-    try:
-        from selectors import DRAWING_SETTINGS_BUTTONS, DRAW_DIALOG
-    except Exception:
-        DRAWING_SETTINGS_BUTTONS = [
-            "[data-name='floating-toolbar'] [data-name*='format']",
-            "[data-name='floating-toolbar'] button[aria-label*='Settings']",
-        ]
-        DRAW_DIALOG = "div[role='dialog']"
-
-    for sel in DRAWING_SETTINGS_BUTTONS:
-        try:
-            await page.locator(sel).first.click(timeout=800)
-            await page.wait_for_selector(DRAW_DIALOG, timeout=1500)
-            return True
-        except Exception:
-            continue
-    return False
-
-
-async def _fibo_present_near(
-    page, start: tuple[float, float], end: tuple[float, float]
-) -> bool:
-    """フィボレベルのラベル(0.618/0.382/1.618など)が描画範囲近くにあるかを検出。
-    近傍に2つ以上見つかれば存在とみなす。
-    """
-    min_x = min(start[0], end[0]) - 40
-    max_x = max(start[0], end[0]) + 40
-    min_y = min(start[1], end[1]) - 120
-    max_y = max(start[1], end[1]) + 120
-
-    candidates = [
-        "0.618",
-        "0.382",
-        "1.618",
-        "2.618",
-        "0.5",
-    ]
-
-    total = 0
-    for text in candidates:
-        try:
-            loc = page.locator(f"span:has-text('{text}'), div:has-text('{text}')").first
-            # いくつか同名要素がある場合があるので、最大10件まで走査
-            all_loc = page.locator(f"span:has-text('{text}'), div:has-text('{text}')")
-            count = await all_loc.count()
-            for i in range(min(count, 10)):
-                box = await all_loc.nth(i).bounding_box()
-                if not box:
-                    continue
-                if min_x <= box["x"] <= max_x and min_y <= box["y"] <= max_y:
-                    total += 1
-                    if total >= 2:
-                        return True
-        except Exception:
-            continue
-    return False
-
-
-async def _tune_fibo_style(page) -> bool:
-    """フィボの色/太さ/ラベルONを適用（可能な範囲で）。"""
-    try:
-        from selectors import (
-            DRAW_DIALOG,
-            DRAW_OK_BUTTON,
-            DRAW_LINEWIDTH_BUTTONS,
-            DRAW_LABELS_TOGGLES,
-        )
-    except Exception:
-        DRAW_DIALOG = "div[role='dialog']"
-        DRAW_OK_BUTTON = f"{DRAW_DIALOG} button:has-text('OK'), {DRAW_DIALOG} button:has-text('Apply')"
-        DRAW_LINEWIDTH_BUTTONS = f"{DRAW_DIALOG} button[aria-label*='px']"
-        DRAW_LABELS_TOGGLES = f"{DRAW_DIALOG} label:has-text('Label')"
-
-    ok_any = False
-    # 太さ: 3px → 2px の順で探す
-    try:
-        btn = page.locator(DRAW_LINEWIDTH_BUTTONS).first
-        await btn.click(timeout=800)
-        for px in ("3px", "2px"):
-            with contextlib.suppress(Exception):
-                await page.get_by_role("menuitem", name=px, exact=False).first.click(
-                    timeout=600
-                )
-                ok_any = True
-                break
-    except Exception:
-        pass
-
-    # ラベルON: チェック可能なトグルを探す
-    try:
-        lbl = page.locator(DRAW_LABELS_TOGGLES).first
-        await lbl.click(timeout=600)
-        ok_any = True
-    except Exception:
-        pass
-
-    # OK/Apply
-    with contextlib.suppress(Exception):
-        await page.locator(DRAW_OK_BUTTON).first.click(timeout=800)
-
-    return ok_any
-
-
 async def screenshot(page, outfile: str):
     """ポップアップを閉じてからスクショを撮る"""
-    # 先に高速ポップアップ処理（上限付き） + CSS強制非表示
-    try:
-        await page.add_style_tag(content=ANTI_POPUP_CSS)
-        await close_popups_fast(page)
-    except Exception:
-        # フォールバック：軽くEscape
-        try:
-            await page.keyboard.press("Escape")
-        except Exception:
-            pass
+    # スクショ直前の軽いクリーンのみ（強いCSS注入は避ける）
+    with contextlib.suppress(Exception):
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(80)
 
     # 少し待機してからスクショ
     await page.wait_for_timeout(250)
@@ -1356,7 +1475,7 @@ async def capture(
                 spec = importlib.util.spec_from_file_location("annotate", str(ap))
                 if spec is None or spec.loader is None:
                     raise ImportError("failed to load annotate module spec")
-                mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+                mod = importlib.util.module_from_spec(spec)
                 sys.modules["annotate"] = mod
                 spec.loader.exec_module(mod)
                 annotate_quiet_trap = getattr(mod, "annotate_quiet_trap")
