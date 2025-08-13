@@ -94,3 +94,9 @@ cache/
 
 
 *.pyc
+tmp_*.json
+tmp_*.out.txt
+test_*.out.txt
+.mypy_cache/
+.venv/
+requests/
