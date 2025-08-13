@@ -22,9 +22,7 @@ env.bak/
 
 # Logs
 *.log
-*.out.txt
 logs/
-automation/logs/
 automation/tmp/
 
 # Playwright
@@ -80,8 +78,6 @@ package-lock.json
 test_*.json
 debug_*.json
 temp_*.json
-tmp_*.json
-tmp_*.out.txt
 
 # 自動生成される設定ファイル
 *_backup.*
@@ -94,5 +90,7 @@ tmp_*.out.txt
 *.sqlite
 *.sqlite3
 cache/
-automation/cache/
 
+
+
+*.pyc
