@@ -1,0 +1,142 @@
+﻿name: Update README summary into repo_tree.md
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "README.md"
+  workflow_dispatch:
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check README diff (skip if no content change)
+        id: diff
+        run: |
+          # 直前コミットと比較（pushトリガのみ想定）/ 手動実行時は常に実行
+          if [ "${{ github.event_name }}" = "push" ]; then
+            git fetch --depth=2 origin ${{ github.ref }}
+            # 変更がREADMEのみでも、空変更ならスキップ
+            if git diff --quiet HEAD^ HEAD -- README.md; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        if: steps.diff.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate summary and update repo_tree.md
+        if: steps.diff.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          python - <<'PY'
+          import re, os, json, datetime, pathlib
+
+          root = pathlib.Path(".").resolve()
+          readme_path = root / "README.md"
+          target = root / "repo_tree.md"
+
+          def read_text(p):
+            return p.read_text(encoding="utf-8") if p.exists() else ""
+
+          md = read_text(readme_path)
+
+          # --- 1) 前処理（コードブロックやHTMLコメントは要約対象から除外） ---
+          md_wo_code = re.sub(r"```.*?```", "", md, flags=re.S)
+          md_wo_code = re.sub(r"<!--.*?-->", "", md_wo_code, flags=re.S)
+
+          # --- 2) 見出しと要点抽出の簡易ヒューリスティック ---
+          lines = [l.rstrip() for l in md_wo_code.splitlines()]
+          bullets = []
+
+          # 見出し系
+          for i, line in enumerate(lines):
+            if re.match(r"^#{1,3}\s+", line):
+              title = re.sub(r"^#{1,3}\s+", "", line).strip()
+              # 見出し直下の最初の非空行を拾う
+              j = i+1
+              snippet = ""
+              while j < len(lines) and not lines[j].strip():
+                j += 1
+              if j < len(lines):
+                snippet = lines[j].strip()
+              # 長すぎるときは切り詰め
+              snippet = re.sub(r"\s+", " ", snippet)
+              if len(snippet) > 140:
+                snippet = snippet[:137] + ""
+              if title:
+                bullets.append(f"**{title}**  {snippet}" if snippet else f"**{title}**")
+
+          # 冒頭の箇条書き（概要箇条書き）も候補に
+          bullet_candidates = [l for l in lines if re.match(r"^\s*[-*]\s+", l)]
+          for b in bullet_candidates[:8]:
+            txt = re.sub(r"^\s*[-*]\s+", "", b).strip()
+            txt = re.sub(r"\s+", " ", txt)
+            if len(txt) > 160: txt = txt[:157] + ""
+            bullets.append(f"- {txt}")
+
+          # 重複/空を削除し、上位5〜8件に圧縮
+          seen = set()
+          uniq = []
+          for b in bullets:
+            key = b.lower()
+            if key and key not in seen:
+              seen.add(key)
+              uniq.append(b)
+          summary = uniq[:7] if uniq else ["（READMEから要約可能な項目が見つかりませんでした）"]
+
+          # --- 3) repo_tree.md を更新（マーカー区間を置換 or 追記） ---
+          marker_start = "<!-- README_SUMMARY_START -->"
+          marker_end   = "<!-- README_SUMMARY_END -->"
+
+          current = read_text(target)
+          ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+          section = []
+          section.append("## README要点")
+          section.append(marker_start)
+          section.append(f"_last updated: {ts}_")
+          section.extend([f"- {s}" if not s.startswith("- ") else s for s in summary])
+          section.append(marker_end)
+          section_text = "\n".join(section) + "\n"
+
+          if current:
+            if marker_start in current and marker_end in current:
+              import re as _re
+              new = _re.sub(
+                rf"{_re.escape(marker_start)}.*?{_re.escape(marker_end)}",
+                marker_start + "\n" + f"_last updated: {ts}_\n" + "\n".join([f"- {s}" if not s.startswith("- ") else s for s in summary]) + "\n" + marker_end,
+                current,
+                flags=_re.S
+              )
+            else:
+              # 末尾に節を追加
+              new = current.rstrip() + "\n\n" + section_text
+          else:
+            # repo_tree.md がない場合は新規作成（タイトルだけ付与）
+            new = "# Repository Tree\n\n" + section_text
+
+          # 保存
+          target.write_text(new, encoding="utf-8")
+          print("Wrote README summary to", target)
+          PY
+
+      - name: Commit and push changes
+        if: steps.diff.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "repo-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add repo_tree.md
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update README summary in repo_tree.md"
+            git push
+          fi
